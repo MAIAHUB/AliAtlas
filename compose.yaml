@@ -1,0 +1,28 @@
+services:
+  web:
+    build: .
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      ATLAS_DATA_DIR: /app/data
+      ATLAS_AI_ENABLED: ${ATLAS_AI_ENABLED:-false}
+      ATLAS_PUBLIC_ORIGIN: ${ATLAS_PUBLIC_ORIGIN:-http://localhost:3000}
+      ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-false}
+    volumes:
+      - atlas-data:/app/data
+    restart: unless-stopped
+  worker:
+    profiles: [ai]
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      ATLAS_DATA_DIR: /app/data
+      ATLAS_AI_DEVICE: ${ATLAS_AI_DEVICE:-cpu}
+      ATLAS_AI_FAST: ${ATLAS_AI_FAST:-true}
+      ATLAS_AI_TIMEOUT_MS: ${ATLAS_AI_TIMEOUT_MS:-1800000}
+    volumes:
+      - atlas-data:/app/data
+    restart: unless-stopped
+volumes:
+  atlas-data:
