@@ -7,7 +7,8 @@ import {
   orientationLabels,
   clamp,
 } from '../lib/geometry.js';
-import { layoutLabels, drawLabels } from '../lib/label-layout.js';
+import { layoutLabels, drawLabels, labelEdge, lineY } from '../lib/label-layout.js';
+import { SliceLoader } from '../lib/slice-loader.js';
 import Icon from './Icon.js';
 
 const DicomViewer = forwardRef(function DicomViewer(
@@ -36,29 +37,48 @@ const DicomViewer = forwardRef(function DicomViewer(
 ) {
   const host = useRef(null),
     canvas = useRef(null),
-    cache = useRef(new Map()),
+    loader = useRef(null),
+    // The last drawn slice stays on screen until the next one is available, so
+    // scrolling never flashes an empty viewport.
+    shown = useRef(null),
+    source = useRef({ canvas: null, key: '' }),
     drag = useRef(null),
     live = useRef({});
   const [size, setSize] = useState({ width: 800, height: 600 }),
-    [loaded, setLoaded] = useState(null),
+    [, setVersion] = useState(0),
+    [progress, setProgress] = useState({ loaded: 0, total: 0 }),
     [error, setError] = useState('');
   const transform = useMemo(
     () => (frame ? imageTransform(frame, size.width, size.height, zoom, pan) : null),
     [frame, size, zoom, pan],
   );
-  const ready = Boolean(frame && loaded?.frameId === frame.id);
+  const current = frame ? loader.current?.get(frame.id) : null;
+  if (current && (shown.current?.frame !== frame || shown.current.pixels !== current))
+    shown.current = { frame, pixels: current };
+  const ready = Boolean(current);
+  const display = shown.current;
   useEffect(() => {
     onReady?.(ready && !error);
   }, [ready, error, onReady]);
   const placed = useMemo(
     () =>
       ready && showLabels && transform
-        ? layoutLabels(labels, transform, size.width, size.height)
+        ? layoutLabels(labels, transform, size.width, size.height, [
+            transform.x,
+            transform.x + frame.columns * transform.sx,
+          ])
         : [],
     [ready, showLabels, labels, transform, size],
   );
   const directions = orientationLabels(frame);
-  live.current = { onSlice, index, count: series?.frames.length || 0, zoom, setZoom };
+  live.current = {
+    onSlice,
+    index,
+    count: series?.frames.length || 0,
+    zoom,
+    setZoom,
+    frameId: frame?.id,
+  };
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) =>
       setSize({ width: entry.contentRect.width, height: entry.contentRect.height }),
@@ -80,40 +100,46 @@ const DicomViewer = forwardRef(function DicomViewer(
     return () => el.removeEventListener('wheel', wheel);
   }, []);
   useEffect(() => {
-    cache.current.clear();
-    setLoaded(null);
+    shown.current = null;
+    source.current = { canvas: null, key: '' };
+    setError('');
+    if (!series) return;
+    const instance = new SliceLoader({
+      frames: series.frames,
+      async fetchBatch(batch) {
+        const response = await fetch(
+          `/api/studies/${studyId}/slices?series=${series.id}&frames=${batch.map((f) => f.id).join(',')}`,
+        );
+        if (!response.ok)
+          throw new Error((await response.json()).error || 'The CT slices could not be loaded.');
+        return {
+          buffer: await response.arrayBuffer(),
+          format: response.headers.get('X-Pixel-Format'),
+        };
+      },
+      onLoad() {
+        setProgress({ loaded: instance.loaded, total: series.frames.length });
+        setVersion((v) => v + 1);
+      },
+      onError(e, ids) {
+        if (ids.includes(live.current.frameId)) setError(e.message);
+      },
+    });
+    loader.current = instance;
+    setProgress({ loaded: 0, total: series.frames.length });
+    instance.focus(live.current.index || 0);
+    return () => {
+      instance.dispose();
+      if (loader.current === instance) loader.current = null;
+    };
+    // Restart only for a different series; refreshed study objects keep the cache.
   }, [studyId, series?.id]);
   useEffect(() => {
-    if (!frame) return;
-    const controller = new AbortController(),
-      key = `${studyId}/${series.id}/${frame.id}`;
-    setError('');
-    if (cache.current.has(key)) {
-      setLoaded({ frameId: frame.id, pixels: cache.current.get(key) });
-      return;
+    if (frame) {
+      setError('');
+      loader.current?.focus(index);
     }
-    (async () => {
-      const response = await fetch(
-        `/api/studies/${studyId}/pixels?series=${series.id}&frame=${frame.id}`,
-        { signal: controller.signal },
-      );
-      if (!response.ok)
-        throw new Error((await response.json()).error || 'The CT slice could not be loaded.');
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength !== frame.rows * frame.columns * 4)
-        throw new Error('The pixel response is incomplete.');
-      const view = new DataView(bytes),
-        pixels = new Float32Array(frame.rows * frame.columns);
-      for (let i = 0; i < pixels.length; i++) pixels[i] = view.getFloat32(i * 4, true);
-      if (controller.signal.aborted) return;
-      cache.current.set(key, pixels);
-      while (cache.current.size > 8) cache.current.delete(cache.current.keys().next().value);
-      setLoaded({ frameId: frame.id, pixels });
-    })().catch((e) => {
-      if (e.name !== 'AbortError') setError(e.message);
-    });
-    return () => controller.abort();
-  }, [studyId, series?.id, frame?.id]);
+  }, [frame?.id, index]);
   useEffect(() => {
     const surface = canvas.current,
       ratio = window.devicePixelRatio || 1;
@@ -123,34 +149,43 @@ const DicomViewer = forwardRef(function DicomViewer(
     ctx.scale(ratio, ratio);
     ctx.fillStyle = '#030709';
     ctx.fillRect(0, 0, size.width, size.height);
-    if (!ready || !frame || !transform || error) return;
-    const source = document.createElement('canvas');
-    source.width = frame.columns;
-    source.height = frame.rows;
-    const sourceContext = source.getContext('2d'),
-      pixels = sourceContext.createImageData(frame.columns, frame.rows);
-    for (let i = 0; i < loaded.pixels.length; i++) {
-      const v = windowPixel(
-        loaded.pixels[i],
-        windowing.center,
-        windowing.width,
-        frame.inverted !== invert,
-      );
-      pixels.data[i * 4] = v;
-      pixels.data[i * 4 + 1] = v;
-      pixels.data[i * 4 + 2] = v;
-      pixels.data[i * 4 + 3] = 255;
+    if (!display || error) return;
+    const { frame: drawn, pixels } = display;
+    const view = imageTransform(drawn, size.width, size.height, zoom, pan);
+    const inverted = drawn.inverted !== invert;
+    // Windowing is recomputed only when the slice or window changes, not on pan/zoom.
+    const key = `${drawn.id}|${windowing.center}|${windowing.width}|${inverted}`;
+    if (source.current.key !== key) {
+      const target = source.current.canvas || document.createElement('canvas');
+      if (target.width !== drawn.columns || target.height !== drawn.rows) {
+        target.width = drawn.columns;
+        target.height = drawn.rows;
+      }
+      const context = target.getContext('2d'),
+        image = context.createImageData(drawn.columns, drawn.rows),
+        out = new Uint32Array(image.data.buffer);
+      const gray = (v) => {
+        const g = Math.round(windowPixel(v, windowing.center, windowing.width, inverted));
+        return 0xff000000 | (g << 16) | (g << 8) | g;
+      };
+      if (pixels instanceof Int16Array) {
+        const lut = new Uint32Array(65536);
+        for (let v = -32768; v < 32768; v++) lut[v + 32768] = gray(v);
+        for (let i = 0; i < pixels.length; i++) out[i] = lut[pixels[i] + 32768];
+      } else for (let i = 0; i < pixels.length; i++) out[i] = gray(pixels[i]);
+      context.putImageData(image, 0, 0);
+      source.current = { canvas: target, key };
     }
-    sourceContext.putImageData(pixels, 0, 0);
     ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(
-      source,
-      transform.x,
-      transform.y,
-      frame.columns * transform.sx,
-      frame.rows * transform.sy,
+      source.current.canvas,
+      view.x,
+      view.y,
+      drawn.columns * view.sx,
+      drawn.rows * view.sy,
     );
-  }, [loaded, ready, frame, transform, size, windowing, invert, error]);
+  }, [display, size, zoom, pan, windowing, invert, error]);
   useImperativeHandle(
     ref,
     () => ({
@@ -285,33 +320,24 @@ const DicomViewer = forwardRef(function DicomViewer(
                   }}
                 >
                   <path
-                    d={`M ${item.side === 'left' ? item.x + item.width : item.x} ${item.y + 15} L ${item.anchor[0]} ${item.anchor[1]}`}
+                    d={`M ${labelEdge(item)} ${item.y + item.height / 2} L ${item.anchor[0]} ${item.anchor[1]}`}
                     stroke={item.color}
                   />
-                  <circle
-                    cx={item.anchor[0]}
-                    cy={item.anchor[1]}
-                    r="3.5"
-                    fill="#030709"
-                    stroke={item.color}
-                  />
+                  <circle cx={item.anchor[0]} cy={item.anchor[1]} r="4" fill={item.color} />
                   <rect
                     x={item.x}
                     y={item.y}
                     width={item.width}
-                    height="30"
-                    rx="2"
+                    height={item.height}
+                    rx="3"
+                    stroke={item.color}
                     role="button"
                     tabIndex="0"
                     aria-label={`Select ${item.label}`}
                   />
-                  <text x={item.x + 8} fill={item.color}>
+                  <text fill={item.color}>
                     {item.lines.map((line, i) => (
-                      <tspan
-                        key={i}
-                        x={item.x + 8}
-                        y={item.y + (item.lines.length === 1 ? 19 : 12 + i * 12)}
-                      >
+                      <tspan key={i} x={item.x + 10} y={lineY(item, i)}>
                         {line}
                       </tspan>
                     ))}
@@ -324,10 +350,18 @@ const DicomViewer = forwardRef(function DicomViewer(
               ))}
             </svg>
           )}
-          {!ready && !error && (
+          {!display && !error && (
             <div className="viewport-message">
               <span className="spinner" />
               Loading CT slice
+            </div>
+          )}
+          {progress.total > 1 && progress.loaded < progress.total && !error && (
+            <div className="slice-buffer" role="status" aria-label="Loading slices">
+              <i style={{ width: `${(progress.loaded / progress.total) * 100}%` }} />
+              <span>
+                Caching slices {progress.loaded}/{progress.total}
+              </span>
             </div>
           )}
           {error && (

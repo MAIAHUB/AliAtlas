@@ -186,6 +186,14 @@ test('isolates workspaces and validates writes and pixel responses', async ({ pl
     expect(pixels.status()).toBe(200);
     expect(pixels.headers()['cache-control']).toBe('no-store');
     expect((await pixels.body()).readFloatLE(0)).toBe(40);
+    const slices = `/api/studies/${id}/slices?series=${series.id}&frames=${frame.id},${series.frames[1].id}`;
+    const batch = await one.get(slices);
+    expect(batch.status()).toBe(200);
+    expect(batch.headers()['x-pixel-format']).toBe('int16-le');
+    const batchBody = await batch.body();
+    expect(batchBody.length).toBe(2 * frame.rows * frame.columns * 2);
+    expect(batchBody.readInt16LE(0)).toBe(40);
+    expect((await two.get(slices)).status()).toBe(404);
     expect((await two.get(`/api/studies/${id}`)).status()).toBe(404);
     expect(
       (await two.get(`/api/studies/${id}/pixels?series=${series.id}&frame=${frame.id}`)).status(),
