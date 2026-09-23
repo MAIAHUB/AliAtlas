@@ -2,7 +2,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DicomViewer from './DicomViewer.js';
 import Icon from './Icon.js';
-import { COLORS, REGIONS, PRESETS, MANUAL_LABELS, structureCategory } from '../lib/catalog.js';
+import {
+  COLORS,
+  REGIONS,
+  PRESETS,
+  MANUAL_LABELS,
+  regionForSeries,
+  structureCategory,
+} from '../lib/catalog.js';
 import { clamp } from '../lib/geometry.js';
 
 async function api(url, options = {}) {
@@ -205,19 +212,12 @@ export default function AtlasWorkspace() {
       const first = [...next.series].sort(
         (a, b) =>
           (/LOCALIZER|SCOUT/.test(a.imageType) ? 1 : 0) -
-            (/LOCALIZER|SCOUT/.test(b.imageType) ? 1 : 0) || b.frames.length - a.frames.length,
+            (/LOCALIZER|SCOUT/.test(b.imageType) ? 1 : 0) ||
+          Number(!!a.segmentationIssue) - Number(!!b.segmentationIssue) ||
+          b.frames.length - a.frames.length,
       )[0];
       changeSeries(first.id, next);
-      const body = first.bodyPart.toLowerCase();
-      setRegion(
-        /chest|thorax/.test(body)
-          ? 'chest'
-          : /abd/.test(body)
-            ? 'abdomen'
-            : /pelvis/.test(body)
-              ? 'pelvis'
-              : 'headneck',
-      );
+      setRegion(regionForSeries(first));
     } catch (e) {
       if (run === sequence.current) fail(e);
     } finally {
@@ -377,9 +377,10 @@ export default function AtlasWorkspace() {
       setModal(null);
       await refreshWorkspace();
       await openStudy(result.studies[0].id);
+      const auto = result.autoLabels?.find((item) => item.studyId === result.studies[0].id);
       setNotice({
-        type: result.skipped ? 'warning' : 'success',
-        message: `Imported ${result.importedFrames} CT frames across ${result.studies.length} ${result.studies.length === 1 ? 'study' : 'studies'}.${result.skipped ? ` ${result.skipped} files skipped. ${result.warnings.join(' ')}` : ''}`,
+        type: result.skipped || (auto && auto.status !== 'queued') ? 'warning' : 'success',
+        message: `Imported ${result.importedFrames} CT frames across ${result.studies.length} ${result.studies.length === 1 ? 'study' : 'studies'}.${result.skipped ? ` ${result.skipped} files skipped. ${result.warnings.join(' ')}` : ''}${auto?.status === 'queued' ? ' Automatic labels are generating in the background.' : auto ? ` ${auto.message}` : ''}`,
       });
     } catch (e) {
       fail(e);

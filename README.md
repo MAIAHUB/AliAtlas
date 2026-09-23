@@ -77,6 +77,7 @@ Update `.env.local`:
 
 ```dotenv
 ATLAS_AI_ENABLED=true
+ATLAS_AUTO_LABEL_ON_IMPORT=true
 ATLAS_PYTHON_BIN=/absolute/path/to/.venv/bin/python
 ATLAS_TOTALSEG_BIN=/absolute/path/to/.venv/bin/TotalSegmentator
 ATLAS_AI_DEVICE=cpu
@@ -90,6 +91,8 @@ npm run worker
 ```
 
 The worker checks the installed runtime and exposes a heartbeat. The Generate button becomes available when the worker is ready and the selected series has usable geometry. Model weights download on first use. CPU execution can be slow, especially for the detailed head/neck tasks; GPU inference uses `ATLAS_AI_DEVICE=gpu` with an appropriate PyTorch installation.
+
+With `ATLAS_AUTO_LABEL_ON_IMPORT=true`, each upload queues the largest eligible CT stack in each imported study as soon as the worker is ready. Imports that contain multiple monotonic acquisition runs under one DICOM series are separated into stacks. A set of images all at the same slice position cannot be labeled as a volume; upload a full run of distinct slices. If the worker is offline or no stack is eligible, the upload still succeeds and the app explains why labeling did not start.
 
 The head/neck preset runs `total`, `head_glands_cavities`, `head_muscles`, `headneck_bones_vessels`, and `headneck_muscles`. Other presets run the major-structure `total` task on the selected CT series. Detailed coverage differs from the reference screenshots; a structure unsupported by the model needs manual labeling or another validated model. No generic text/image AI is used to guess pointer locations.
 
@@ -111,7 +114,7 @@ With the CPU anatomy worker, use `.env` for Compose variables (Compose does not 
 
 ```bash
 cp .env.example .env
-# Set ATLAS_AI_ENABLED=true in .env
+# Set ATLAS_AI_ENABLED=true and ATLAS_AUTO_LABEL_ON_IMPORT=true in .env
 docker compose --profile ai up --build -d
 ```
 

@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeDicom } from './fixtures.mjs';
-import { parseDicom, decodePixels, seriesKey, segmentationEligibility } from '../lib/dicom.js';
+import {
+  acquisitionRuns,
+  parseDicom,
+  decodePixels,
+  seriesKey,
+  segmentationEligibility,
+} from '../lib/dicom.js';
 import {
   sortFrames,
   pixelToLps,
@@ -93,6 +99,24 @@ test('keeps incompatible orientations in separate stacks', () => {
     seriesKey(parseDicom(makeDicom())),
     seriesKey(parseDicom(makeDicom({ orientation: [0, 1, 0, 0, 0, 1] }))),
   );
+});
+test('separates repeated CT acquisition runs by instance order', () => {
+  const positions = [0, -2, -4, -6, 6, 4, 2, 0, -2, -4];
+  const frames = positions.map(
+    (z, index) => parseDicom(makeDicom({ index, position: [0, 0, z] })).frames[0],
+  );
+  const runs = acquisitionRuns(frames.toReversed());
+  assert.deepEqual(
+    runs.map((run) => run.length),
+    [4, 6],
+  );
+  assert.ok(runs.every((run) => !segmentationEligibility({ frames: run })));
+  const repeated = Array.from(
+    { length: 5 },
+    (_, index) => parseDicom(makeDicom({ index, position: [0, 0, 0] })).frames[0],
+  );
+  assert.equal(acquisitionRuns(repeated).length, 1);
+  assert.match(segmentationEligibility({ frames: repeated }), /overlapping slice positions/);
 });
 test('respects DICOM row/column spacing and orientation', () => {
   const f = { position: [10, 20, 30], orientation: [0, 1, 0, 0, 0, 1], spacing: [2, 3] };

@@ -6,6 +6,7 @@ services:
     environment:
       ATLAS_DATA_DIR: /app/data
       ATLAS_AI_ENABLED: ${ATLAS_AI_ENABLED:-false}
+      ATLAS_AUTO_LABEL_ON_IMPORT: ${ATLAS_AUTO_LABEL_ON_IMPORT:-false}
       ATLAS_PUBLIC_ORIGIN: ${ATLAS_PUBLIC_ORIGIN:-http://localhost:3000}
       ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-false}
     volumes:
