@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { session, sameOrigin, json, route } from '../../../../lib/http.js';
+import { sameOrigin, json, route } from '../../../../lib/http.js';
+import { requireUser } from '../../../../lib/auth.js';
+import { audit } from '../../../../lib/db.js';
 import {
   loadStudy,
   publicStudy,
@@ -13,13 +15,13 @@ import { listJobs } from '../../../../lib/jobs.js';
 import { assert } from '../../../../lib/errors.js';
 export const runtime = 'nodejs';
 export const GET = route(async (request, { params }) => {
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params;
   return json(publicStudy(await loadStudy(owner, id)));
 });
 export const DELETE = route(async (request, { params }) => {
   sameOrigin(request);
-  const { owner } = session(request),
+  const { user, owner } = await requireUser(request),
     { id } = await params;
   await loadStudy(owner, id);
   await withLock(studyDir(owner, id), async () => {
@@ -35,5 +37,7 @@ export const DELETE = route(async (request, { params }) => {
     }
     await fs.rm(studyDir(owner, id), { recursive: true, force: true });
   });
+  // The Orthanc copy is kept as the archive; the study can be reopened from there.
+  await audit(user.id, 'study.delete', { studyId: id });
   return json({ deleted: true });
 });

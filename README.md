@@ -2,7 +2,7 @@
 
 A CT anatomy workspace built with **Next.js, React, and a JavaScript/Node.js backend**, inspired by the supplied axial head/neck atlas references.
 
-Upload a DICOM series, select a stack, scroll through its slices, and place anatomical labels that remain attached to the correct image coordinates. An optional Node worker runs a real segmentation model and creates slice-specific labels from its output.
+Sign in, upload a DICOM series (archived in [Orthanc](https://www.orthanc-server.com/)), select a stack, scroll through its slices, and place anatomical labels that remain attached to the correct image coordinates. An optional Node worker runs a real segmentation model and creates slice-specific labels from its output.
 
 ![AliAtlas desktop workspace displaying the synthetic QA phantom](docs/preview.png)
 
@@ -15,10 +15,22 @@ Use Node.js 22 or newer:
 ```bash
 npm ci
 cp .env.example .env.local
+docker compose up -d postgres orthanc
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000). On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`.
+Open [localhost:3000](http://localhost:3000), choose **Create an account**, and sign in. On Windows PowerShell, use `Copy-Item .env.example .env.local` instead of `cp`.
+
+PostgreSQL holds accounts, sessions, archive ownership, and an audit log; the schema is created automatically on first use. If port 5432 is already taken by a local PostgreSQL, set `POSTGRES_PORT=5433` (in `.env` or your shell) before `docker compose up`, and use port 5433 in `DATABASE_URL` in `.env.local`.
+
+## Accounts and the Orthanc archive
+
+- Anyone who can reach the site can register with a name, email, and password (at least 10 characters). Passwords are hashed with scrypt; sessions are random 256-bit tokens stored only as SHA-256 hashes and sent as an HTTP-only, `SameSite=Strict` cookie for 30 days. Sign-in is throttled after 8 failures per account in 15 minutes.
+- Each account has its own private workspace. Every study, pixel, annotation, job, and archive request checks the signed-in user.
+- When `ORTHANC_URL` is set, every upload is stored in Orthanc before the study appears in the workspace (compressed files are archived in their original transfer syntax). If Orthanc is unreachable, the upload fails rather than skipping the archive.
+- Orthanc has no per-user permissions, so AliAtlas records which Orthanc instances each account uploaded. **Import DICOM → From Orthanc archive** lists and reopens only those instances; another account uploading the same Study Instance UID does not gain access to yours.
+- Removing a study from the workspace keeps its Orthanc copy. Delete archived data in Orthanc Explorer 2 at [localhost:8042](http://localhost:8042) (user `aliatlas`, password from `ORTHANC_PASSWORD`). Studies sent to Orthanc directly (not through AliAtlas) are not owned by any account and do not appear in the app.
+- Leave `ORTHANC_URL` empty to run without an archive.
 
 For a production build on a local server:
 
@@ -37,7 +49,8 @@ npm start
 - Display conventional and Enhanced multi-frame CT source images. Labels use SOP Instance UID and frame identity, including after annotation export/import.
 - Add, edit, delete, review, search, and filter anatomical labels. The overlay follows pan, zoom, and pixel spacing.
 - Save annotations on the server; export the displayed slice as PNG and study annotations as JSON.
-- Keep each browser workspace's studies separate using an opaque HTTP-only cookie. Every study, pixel, annotation, and job request checks its owner.
+- Email/password accounts backed by PostgreSQL; each account's studies are private. Every study, pixel, annotation, and job request checks its owner.
+- Archive uploads in an Orthanc DICOM server and reopen them later from the import dialog.
 - Queue real anatomy jobs, show progress, recover interrupted jobs, and preserve manually reviewed labels during regeneration.
 
 **This is an educational application, not a validated diagnostic device.** No pretrained inference or clinical accuracy is implied by the synthetic tests.
@@ -110,6 +123,8 @@ Viewer, uploads, manual labels, and GDCM decoding:
 docker compose up --build -d web
 ```
 
+This also starts PostgreSQL and Orthanc (Orthanc keeps its DICOM index in a separate `orthanc` database on the same PostgreSQL server). Set `POSTGRES_PASSWORD` and `ORTHANC_PASSWORD` in `.env` before the first start; the Postgres password is fixed when its volume is created.
+
 With the CPU anatomy worker, use `.env` for Compose variables (Compose does not automatically read `.env.local`):
 
 ```bash
@@ -124,11 +139,13 @@ For an NVIDIA GPU host with NVIDIA Container Toolkit:
 docker compose -f compose.yaml -f compose.gpu.yaml --profile ai up --build -d
 ```
 
-The Compose example binds to `127.0.0.1:3000` and expects you to open `http://localhost:3000`. If you use `http://127.0.0.1:3000`, set `ATLAS_PUBLIC_ORIGIN` to that exact origin. Both containers share the `atlas-data` volume. Run **one web instance and one worker** against this filesystem. This storage/queue implementation targets a single persistent Node server, not ephemeral serverless hosting or a multi-instance deployment. Docker images and pretrained model execution still need verification on the target host.
+The Compose example binds to `127.0.0.1:3000` and accepts writes from `http://localhost:3000` and `http://127.0.0.1:3000`. For any other address, set `ATLAS_PUBLIC_ORIGIN` to a comma-separated list of the exact origins. Both containers share the `atlas-data` volume. Run **one web instance and one worker** against this filesystem. This storage/queue implementation targets a single persistent Node server, not ephemeral serverless hosting or a multi-instance deployment. Docker images and pretrained model execution still need verification on the target host.
 
 ## Workspace and deployment boundaries
 
-The cookie separates browser workspaces; it is **not an account login, SSO, or a hospital authorization system**. Losing/clearing the cookie loses access to that browser's existing workspace. Before offering this to clinical users, integrate your identity provider and bind study ownership to verified users/organizations. Add retention, audited access, encrypted storage, backups, and an operator recovery flow appropriate to your deployment.
+Accounts use self-registration with email and password. There is no email verification, password reset, MFA, SSO, or role model yet, so this is **not a hospital authorization system**. Before offering this to clinical users, integrate your identity provider, restrict registration, and add retention, encrypted storage, backups, and an operator recovery flow appropriate to your deployment. Sign-ins, registrations, uploads, archive opens, and study removals are recorded in the `audit_events` table.
+
+Workspaces created by the earlier anonymous-cookie version are not linked to any account and are no longer reachable from the app; their files remain under `data/workspaces/`.
 
 Study data can include patient information in original DICOM files and series descriptions. Nothing is automatically de-identified. Do not commit real scans or mount the data directory under `public/`. The supplied fixture generator contains only synthetic data.
 
@@ -142,6 +159,8 @@ npm run build
 npx playwright install --with-deps chromium
 npm run test:e2e
 ```
+
+The browser tests need PostgreSQL (`DATABASE_URL`, default `127.0.0.1:5432`); set `ORTHANC_URL`, `ORTHANC_USERNAME`, and `ORTHANC_PASSWORD` as well to include the archive checks.
 
 The tests cover byte order, signed pixel decoding, rescale, stored bit depth, multi-frame geometry, physical sorting, annotation identity, LPS/RAS and permuted-affine mapping, valid mask anchors, worker queue persistence, workspace isolation, and the upload/view/label/export browser workflow. The worker integration test uses an explicitly synthetic process double; it validates orchestration and geometry, not pretrained inference quality.
 
@@ -163,6 +182,8 @@ Import `fixtures/ct`. These generated files are excluded from Git and are **not*
 | `lib/dicom.js`, `lib/geometry.js`      | Metadata, native pixel decoding and coordinate transforms               |
 | `lib/import.js`                        | Bounded multipart upload, ZIP streaming, validation and series grouping |
 | `lib/storage.js`, `lib/annotations.js` | Workspace ownership, atomic storage and frame-bound annotations         |
+| `lib/db.js`, `lib/auth.js`             | PostgreSQL schema, accounts, password hashing and sessions              |
+| `lib/orthanc.js`                       | Orthanc archive upload, per-account ownership and reopening             |
 | `lib/jobs.js`, `scripts/worker.mjs`    | Persistent job queue and TotalSegmentator process integration           |
 | `lib/segmentation.js`                  | NIfTI labelmap alignment and mask-contained anchors                     |
 | `tests/`                               | Synthetic fixtures, unit/integration tests and browser checks           |

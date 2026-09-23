@@ -8,6 +8,28 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_USER: aliatlas
+          POSTGRES_PASSWORD: aliatlas-ci
+          POSTGRES_DB: aliatlas
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U aliatlas" --health-interval 5s --health-timeout 3s
+          --health-retries 20
+      orthanc:
+        image: orthancteam/orthanc:26.9.1
+        env:
+          ORTHANC__AUTHENTICATION_ENABLED: 'true'
+          ORTHANC__REGISTERED_USERS: '{"aliatlas": "aliatlas-ci"}'
+        ports: ['8042:8042']
+    env:
+      DATABASE_URL: postgres://aliatlas:aliatlas-ci@127.0.0.1:5432/aliatlas
+      ORTHANC_URL: http://127.0.0.1:8042
+      ORTHANC_USERNAME: aliatlas
+      ORTHANC_PASSWORD: aliatlas-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

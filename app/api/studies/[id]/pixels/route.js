@@ -1,12 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { session, route } from '../../../../../lib/http.js';
+import { route } from '../../../../../lib/http.js';
+import { requireUser } from '../../../../../lib/auth.js';
 import { loadStudy, getSeries, seriesDir } from '../../../../../lib/storage.js';
 import { decodePixels } from '../../../../../lib/dicom.js';
 import { assert } from '../../../../../lib/errors.js';
 export const runtime = 'nodejs';
 export const GET = route(async (request, { params }) => {
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     url = new URL(request.url);
   const study = await loadStudy(owner, id),

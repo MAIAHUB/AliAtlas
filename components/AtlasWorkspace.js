@@ -20,10 +20,22 @@ async function api(url, options = {}) {
       : options.headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
+  if (response.status === 401) signedOut();
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'The request failed.');
   return body;
 }
+function signedOut() {
+  window.location.replace('/login');
+  throw new Error('Your session has ended. Sign in again.');
+}
+const initials = (name) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('') || '?';
 function saveFile(content, name, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([content], { type })),
     a = document.createElement('a');
@@ -81,7 +93,7 @@ function Tool({ icon, children, active, onClick, disabled, title }) {
   );
 }
 
-export default function AtlasWorkspace() {
+export default function AtlasWorkspace({ user }) {
   const [studies, setStudies] = useState([]),
     [study, setStudy] = useState(null),
     [seriesId, setSeriesId] = useState(''),
@@ -89,6 +101,10 @@ export default function AtlasWorkspace() {
   const [records, setRecords] = useState([]),
     [jobs, setJobs] = useState([]),
     [ai, setAi] = useState({ ready: false }),
+    [archive, setArchive] = useState({ enabled: false }),
+    [importSource, setImportSource] = useState('upload'),
+    [archived, setArchived] = useState(null),
+    [openingArchive, setOpeningArchive] = useState(null),
     [initialized, setInitialized] = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
   const [mode, setMode] = useState('scroll'),
@@ -228,6 +244,7 @@ export default function AtlasWorkspace() {
     const workspace = await api('/api/workspace');
     setStudies(workspace.studies);
     setAi(workspace.ai);
+    setArchive(workspace.archive);
     setInitialized(true);
     return workspace;
   }
@@ -241,6 +258,7 @@ export default function AtlasWorkspace() {
         if (!alive) return;
         setStudies(w.studies);
         setAi(w.ai);
+        setArchive(w.archive);
         setInitialized(true);
         if (w.studies[0]) openStudy(w.studies[0].id);
       })
@@ -342,7 +360,47 @@ export default function AtlasWorkspace() {
     setPlaying(false);
     setFiles([]);
     setUploadProgress(null);
+    setImportSource('upload');
     setModal('import');
+  }
+  async function signOut() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    window.location.replace('/login');
+  }
+  async function showArchive() {
+    setImportSource('archive');
+    setArchived(null);
+    try {
+      setArchived((await api('/api/orthanc/studies')).studies);
+    } catch (e) {
+      setArchived([]);
+      fail(e);
+    }
+  }
+  async function openArchived(orthancStudyId) {
+    setOpeningArchive(orthancStudyId);
+    setNotice(null);
+    try {
+      const result = await api('/api/orthanc/studies/import', {
+        method: 'POST',
+        body: { orthancStudyId },
+      });
+      await finishImport(result);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setOpeningArchive(null);
+    }
+  }
+  async function finishImport(result) {
+    setModal(null);
+    await refreshWorkspace();
+    await openStudy(result.studies[0].id);
+    const auto = result.autoLabels?.find((item) => item.studyId === result.studies[0].id);
+    setNotice({
+      type: result.skipped || (auto && auto.status !== 'queued') ? 'warning' : 'success',
+      message: `Imported ${result.importedFrames} CT frames across ${result.studies.length} ${result.studies.length === 1 ? 'study' : 'studies'}.${result.archive ? ' Archived in Orthanc.' : ''}${result.skipped ? ` ${result.skipped} files skipped. ${result.warnings.join(' ')}` : ''}${auto?.status === 'queued' ? ' Automatic labels are generating in the background.' : auto ? ` ${auto.message}` : ''}`,
+    });
   }
   async function upload() {
     if (!files.length) return;
@@ -358,6 +416,10 @@ export default function AtlasWorkspace() {
           if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
         };
         xhr.onload = () => {
+          if (xhr.status === 401) {
+            window.location.replace('/login');
+            return reject(new Error('Your session has ended. Sign in again.'));
+          }
           try {
             const body = JSON.parse(xhr.responseText);
             if (xhr.status >= 200 && xhr.status < 300) resolve(body);
@@ -374,14 +436,7 @@ export default function AtlasWorkspace() {
           );
         xhr.send(data);
       });
-      setModal(null);
-      await refreshWorkspace();
-      await openStudy(result.studies[0].id);
-      const auto = result.autoLabels?.find((item) => item.studyId === result.studies[0].id);
-      setNotice({
-        type: result.skipped || (auto && auto.status !== 'queued') ? 'warning' : 'success',
-        message: `Imported ${result.importedFrames} CT frames across ${result.studies.length} ${result.studies.length === 1 ? 'study' : 'studies'}.${result.skipped ? ` ${result.skipped} files skipped. ${result.warnings.join(' ')}` : ''}${auto?.status === 'queued' ? ' Automatic labels are generating in the background.' : auto ? ` ${auto.message}` : ''}`,
-      });
+      await finishImport(result);
     } catch (e) {
       fail(e);
     } finally {
@@ -531,7 +586,11 @@ export default function AtlasWorkspace() {
         <div className="header-actions">
           <span className="private-badge">
             <Icon name="lock" size={13} />
-            Private workspace
+            {archive.enabled
+              ? archive.ready
+                ? 'Private · Orthanc archive'
+                : 'Private · archive offline'
+              : 'Private workspace'}
           </span>
           <button
             className="text-button help-button"
@@ -543,7 +602,15 @@ export default function AtlasWorkspace() {
             <Icon name="book" size={16} />
             Quick guide
           </button>
-          <div className="workspace-avatar">MA</div>
+          <div className="user-menu">
+            <small title={user.email}>{user.email}</small>
+            <div className="workspace-avatar" title={user.name} aria-hidden="true">
+              {initials(user.name)}
+            </div>
+            <button className="text-button" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
       <div className={`workspace-grid ${sideOpen ? '' : 'sidebar-hidden'}`}>
@@ -1163,120 +1230,208 @@ export default function AtlasWorkspace() {
           subtitle="Import your CT images to start exploring."
           onClose={() => setModal(null)}
           wide
-          locked={uploadBusy}
+          locked={uploadBusy || Boolean(openingArchive)}
         >
-          <div
-            className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!uploadBusy) setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              if (!uploadBusy) setFiles(Array.from(e.dataTransfer.files));
-            }}
-          >
-            <span className="upload-icon">
-              <Icon name="upload" size={30} />
-            </span>
-            <h3>
-              {files.length
-                ? `${files.length} ${files.length === 1 ? 'file' : 'files'} selected`
-                : 'Drop your DICOM files here'}
-            </h3>
-            <p>
-              {files.length
-                ? `${(files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1)} MB ready to import`
-                : 'DICOM files or a ZIP archive · up to 512 MB'}
-            </p>
-            <div className="upload-choices">
+          {archive.enabled && (
+            <div className="import-tabs" role="tablist">
               <button
-                className="secondary-button"
-                disabled={uploadBusy}
-                onClick={() => fileInput.current.click()}
+                role="tab"
+                aria-selected={importSource === 'upload'}
+                disabled={uploadBusy || Boolean(openingArchive)}
+                onClick={() => setImportSource('upload')}
               >
-                <Icon name="layers" size={15} />
-                Choose files
+                Upload files
               </button>
               <button
-                className="secondary-button"
-                disabled={uploadBusy}
-                onClick={() => folderInput.current.click()}
+                role="tab"
+                aria-selected={importSource === 'archive'}
+                disabled={uploadBusy || Boolean(openingArchive)}
+                onClick={showArchive}
               >
-                <Icon name="folder" size={15} />
-                Choose folder
+                From Orthanc archive
               </button>
             </div>
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              className="sr-only"
-              onChange={(e) => setFiles(Array.from(e.target.files))}
-            />
-            <input
-              ref={folderInput}
-              type="file"
-              multiple
-              webkitdirectory=""
-              className="sr-only"
-              onChange={(e) => setFiles(Array.from(e.target.files))}
-            />
-          </div>
-          <div className="upload-note">
-            <Icon name="lock" size={16} />
-            <p>
-              Images are uploaded to your AliAtlas server and kept in this browser’s workspace. You
-              can remove a study when you’re done.
-            </p>
-          </div>
-          <div className="upload-steps">
-            <span>
-              <b>01</b>Import CT
-            </span>
-            <Icon name="arrow" size={14} />
-            <span>
-              <b>02</b>Select series
-            </span>
-            <Icon name="arrow" size={14} />
-            <span>
-              <b>03</b>Explore & label
-            </span>
-          </div>
-          {uploadBusy && (
-            <div className="upload-progress" role="status">
-              <progress max="100" value={uploadProgress} />
-              <span>
-                {uploadProgress === 100
-                  ? 'Extracting and organizing DICOM slices…'
-                  : `Uploading ${uploadProgress}%`}
-              </span>
-            </div>
           )}
-          {notice?.type === 'error' && (
-            <p className="form-error" role="alert">
-              {notice.message}
-            </p>
+          {importSource === 'archive' ? (
+            <>
+              {archived === null ? (
+                <p className="archive-empty" role="status">
+                  <span className="spinner small" /> Loading archived studies…
+                </p>
+              ) : archived.length === 0 ? (
+                <p className="archive-empty">
+                  No archived studies yet. Studies you upload are stored in Orthanc automatically.
+                </p>
+              ) : (
+                <ul className="archive-list">
+                  {archived.map((item) => (
+                    <li key={item.id}>
+                      <div>
+                        <b>{item.description || 'CT study'}</b>
+                        <small>
+                          {item.studyDate &&
+                            `${item.studyDate.slice(0, 4)}-${item.studyDate.slice(4, 6)}-${item.studyDate.slice(6, 8)} · `}
+                          {item.instances} {item.instances === 1 ? 'file' : 'files'} · archived{' '}
+                          {new Date(item.archivedAt).toLocaleDateString()}
+                          {!item.available && ' · missing from Orthanc'}
+                        </small>
+                      </div>
+                      <button
+                        className="secondary-button"
+                        disabled={!item.available || Boolean(openingArchive)}
+                        onClick={() => openArchived(item.id)}
+                      >
+                        {openingArchive === item.id ? (
+                          <span className="spinner small" />
+                        ) : (
+                          <Icon name="folder" size={15} />
+                        )}
+                        Open
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {notice?.type === 'error' && (
+                <p className="form-error" role="alert">
+                  {notice.message}
+                </p>
+              )}
+              <div className="modal-actions">
+                <button
+                  className="text-button"
+                  disabled={Boolean(openingArchive)}
+                  onClick={() => setModal(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!uploadBusy) setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  if (!uploadBusy) setFiles(Array.from(e.dataTransfer.files));
+                }}
+              >
+                <span className="upload-icon">
+                  <Icon name="upload" size={30} />
+                </span>
+                <h3>
+                  {files.length
+                    ? `${files.length} ${files.length === 1 ? 'file' : 'files'} selected`
+                    : 'Drop your DICOM files here'}
+                </h3>
+                <p>
+                  {files.length
+                    ? `${(files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1)} MB ready to import`
+                    : 'DICOM files or a ZIP archive · up to 512 MB'}
+                </p>
+                <div className="upload-choices">
+                  <button
+                    className="secondary-button"
+                    disabled={uploadBusy}
+                    onClick={() => fileInput.current.click()}
+                  >
+                    <Icon name="layers" size={15} />
+                    Choose files
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={uploadBusy}
+                    onClick={() => folderInput.current.click()}
+                  >
+                    <Icon name="folder" size={15} />
+                    Choose folder
+                  </button>
+                </div>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={(e) => setFiles(Array.from(e.target.files))}
+                />
+                <input
+                  ref={folderInput}
+                  type="file"
+                  multiple
+                  webkitdirectory=""
+                  className="sr-only"
+                  onChange={(e) => setFiles(Array.from(e.target.files))}
+                />
+              </div>
+              <div className="upload-note">
+                <Icon name="lock" size={16} />
+                <p>
+                  {archive.enabled
+                    ? 'Images are stored in your Orthanc archive and opened in your private workspace. Removing a study from the workspace keeps the archived copy.'
+                    : 'Images are uploaded to your AliAtlas server and kept in your private workspace. You can remove a study when you’re done.'}
+                </p>
+              </div>
+              <div className="upload-steps">
+                <span>
+                  <b>01</b>Import CT
+                </span>
+                <Icon name="arrow" size={14} />
+                <span>
+                  <b>02</b>Select series
+                </span>
+                <Icon name="arrow" size={14} />
+                <span>
+                  <b>03</b>Explore & label
+                </span>
+              </div>
+              {uploadBusy && (
+                <div className="upload-progress" role="status">
+                  <progress max="100" value={uploadProgress} />
+                  <span>
+                    {uploadProgress === 100
+                      ? 'Extracting and organizing DICOM slices…'
+                      : `Uploading ${uploadProgress}%`}
+                  </span>
+                </div>
+              )}
+              {notice?.type === 'error' && (
+                <p className="form-error" role="alert">
+                  {notice.message}
+                </p>
+              )}
+              <div className="modal-actions">
+                <button
+                  className="text-button"
+                  disabled={uploadBusy}
+                  onClick={() => setModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={
+                    !files.length ||
+                    uploadBusy ||
+                    files.reduce((n, f) => n + f.size, 0) > 512 * 1024 * 1024
+                  }
+                  onClick={upload}
+                >
+                  {uploadBusy ? (
+                    <span className="spinner small" />
+                  ) : (
+                    <Icon name="upload" size={16} />
+                  )}
+                  Import study
+                </button>
+              </div>
+            </>
           )}
-          <div className="modal-actions">
-            <button className="text-button" disabled={uploadBusy} onClick={() => setModal(null)}>
-              Cancel
-            </button>
-            <button
-              className="primary-button"
-              disabled={
-                !files.length ||
-                uploadBusy ||
-                files.reduce((n, f) => n + f.size, 0) > 512 * 1024 * 1024
-              }
-              onClick={upload}
-            >
-              {uploadBusy ? <span className="spinner small" /> : <Icon name="upload" size={16} />}
-              Import study
-            </button>
-          </div>
         </Modal>
       )}
       {modal === 'label' && draft && (

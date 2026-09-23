@@ -1,14 +1,59 @@
 services:
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_USER: aliatlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aliatlas-dev-password}
+      POSTGRES_DB: aliatlas
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-orthanc.sql:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'aliatlas', '-d', 'aliatlas']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  orthanc:
+    image: orthancteam/orthanc:26.9.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Orthanc Explorer 2 for administrators; bound to this machine only.
+      - '127.0.0.1:8042:8042'
+    environment:
+      ORTHANC__NAME: AliAtlas archive
+      ORTHANC__AUTHENTICATION_ENABLED: 'true'
+      ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-aliatlas}": "${ORTHANC_PASSWORD:-aliatlas-dev-password}"}'
+      ORTHANC__POSTGRESQL__HOST: postgres
+      ORTHANC__POSTGRESQL__DATABASE: orthanc
+      ORTHANC__POSTGRESQL__USERNAME: aliatlas
+      ORTHANC__POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-aliatlas-dev-password}
+    volumes:
+      - orthanc-storage:/var/lib/orthanc/db
+    restart: unless-stopped
   web:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      orthanc:
+        condition: service_started
     ports:
       - '127.0.0.1:3000:3000'
     environment:
       ATLAS_DATA_DIR: /app/data
       ATLAS_AI_ENABLED: ${ATLAS_AI_ENABLED:-false}
       ATLAS_AUTO_LABEL_ON_IMPORT: ${ATLAS_AUTO_LABEL_ON_IMPORT:-false}
-      ATLAS_PUBLIC_ORIGIN: ${ATLAS_PUBLIC_ORIGIN:-http://localhost:3000}
+      ATLAS_PUBLIC_ORIGIN: ${ATLAS_PUBLIC_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
       ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-false}
+      DATABASE_URL: postgres://aliatlas:${POSTGRES_PASSWORD:-aliatlas-dev-password}@postgres:5432/aliatlas
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USERNAME: ${ORTHANC_USERNAME:-aliatlas}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-aliatlas-dev-password}
     volumes:
       - atlas-data:/app/data
     restart: unless-stopped
@@ -27,3 +72,5 @@ services:
     restart: unless-stopped
 volumes:
   atlas-data:
+  postgres-data:
+  orthanc-storage:

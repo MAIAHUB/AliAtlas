@@ -1,4 +1,5 @@
-import { session, sameOrigin, json, route, readBody } from '../../../../../lib/http.js';
+import { sameOrigin, json, route, readBody } from '../../../../../lib/http.js';
+import { requireUser } from '../../../../../lib/auth.js';
 import { loadStudy, readJson } from '../../../../../lib/storage.js';
 import {
   annotationFile,
@@ -10,7 +11,7 @@ import {
 import { assert } from '../../../../../lib/errors.js';
 export const runtime = 'nodejs';
 export const GET = route(async (request, { params }) => {
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     study = await loadStudy(owner, id);
   const current = await readJson(annotationFile(owner, id));
@@ -22,7 +23,7 @@ export const GET = route(async (request, { params }) => {
 });
 export const POST = route(async (request, { params }) => {
   sameOrigin(request);
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     input = await readBody(request);
   return json(
@@ -35,7 +36,7 @@ export const POST = route(async (request, { params }) => {
 });
 export const PATCH = route(async (request, { params }) => {
   sameOrigin(request);
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     input = await readBody(request);
   return json(
@@ -65,7 +66,7 @@ export const PATCH = route(async (request, { params }) => {
 });
 export const DELETE = route(async (request, { params }) => {
   sameOrigin(request);
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     input = await readBody(request);
   return json(
@@ -81,7 +82,7 @@ export const DELETE = route(async (request, { params }) => {
 });
 export const PUT = route(async (request, { params }) => {
   sameOrigin(request);
-  const { owner } = session(request),
+  const { owner } = await requireUser(request),
     { id } = await params,
     bundle = await readBody(request, 20_000_000);
   return json(
