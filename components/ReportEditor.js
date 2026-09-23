@@ -8,8 +8,8 @@ import { formatHu } from '../lib/roi.js';
 const SECTIONS = [
   { key: 'clinicalHistory', title: 'Clinical history', rows: 2 },
   { key: 'technique', title: 'Technique', rows: 2 },
-  { key: 'findingsText', title: 'Findings', rows: 7 },
-  { key: 'impression', title: 'Impression', rows: 3 },
+  { key: 'findingsText', title: 'Findings', rows: 6 },
+  { key: 'impression', title: 'Impression', rows: 4 },
   { key: 'limitations', title: 'Limitations', rows: 2 },
   { key: 'recommendation', title: 'Recommendation', rows: 2 },
 ];
@@ -32,7 +32,8 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
   const [report, setReport] = useState(null),
     [draft, setDraft] = useState(null),
     [saving, setSaving] = useState(false),
-    [message, setMessage] = useState(null);
+    [message, setMessage] = useState(null),
+    [generating, setGenerating] = useState(false);
   useEffect(() => {
     let alive = true;
     api(`/api/studies/${study.id}/report`)
@@ -77,30 +78,113 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
         body: status === 'draft' ? { status } : { ...draft, ...(status ? { status } : {}) },
       });
       setReport({ ...report, ...next });
+      const saved = { final: 'Report finalized.', draft: 'Report reopened for editing.' };
+      setMessage({ error: false, text: saved[status] || 'Draft saved.' });
+      return true;
+    } catch (e) {
+      setMessage({ error: true, text: e.message });
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+  // Fills every section from the measurements; B.AI drafts the impression when connected.
+  async function autoGenerate() {
+    // Ask only when the reader has typed something: text that matches the saved report or
+    // the automatic findings would simply be regenerated.
+    const written = ['findingsText', 'impression', 'limitations', 'recommendation'].some(
+      (k) =>
+        draft[k]?.trim() &&
+        draft[k] !== report[k] &&
+        !(k === 'findingsText' && draft[k] === report.suggestedFindings),
+    );
+    if (
+      written &&
+      !window.confirm('Replace the findings, impression, limitations and recommendation?')
+    )
+      return;
+    setGenerating(true);
+    setMessage(null);
+    try {
+      const generated = await api(`/api/studies/${study.id}/report/generate`, { method: 'POST' });
+      setDraft({
+        ...draft,
+        reportType: generated.reportType,
+        clinicalHistory: draft.clinicalHistory?.trim()
+          ? draft.clinicalHistory
+          : generated.clinicalHistory,
+        technique: generated.technique,
+        findingsText: generated.findingsText,
+        impression: generated.impression,
+        limitations: generated.limitations,
+        recommendation: generated.recommendation,
+      });
+      const source =
+        generated.impressionSource === 'template'
+          ? 'Report generated from the measurements (templates; B.AI not used).'
+          : `Findings, impression, limitations and recommendation written by ${generated.impressionSource} via B.AI; technique from the DICOM.`;
+      const history = draft.clinicalHistory?.trim()
+        ? ''
+        : ' Add the clinical history: it cannot be known from the images.';
       setMessage({
-        error: false,
-        text:
-          status === 'final'
-            ? 'Report finalized.'
-            : status === 'draft'
-              ? 'Report reopened for editing.'
-              : 'Draft saved.',
+        error: Boolean(generated.note),
+        text: `${source}${history} Review every section before saving.${generated.note ? ` ${generated.note}` : ''}`,
       });
     } catch (e) {
       setMessage({ error: true, text: e.message });
     } finally {
-      setSaving(false);
+      setGenerating(false);
+    }
+  }
+  // Saves the current text first so the PDF matches what is on screen.
+  async function downloadPdf() {
+    if (!final && !(await save())) return;
+    setGenerating(true);
+    try {
+      const response = await fetch(`/api/studies/${study.id}/report/pdf`);
+      if (!response.ok) throw new Error((await response.json()).error || 'PDF failed.');
+      const name =
+        /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '')?.[1] ||
+        'AliAtlas-CT-report.pdf';
+      const url = URL.createObjectURL(await response.blob()),
+        a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage({ error: false, text: `Downloaded ${name}.` });
+    } catch (e) {
+      setMessage({ error: true, text: e.message });
+    } finally {
+      setGenerating(false);
     }
   }
   if (!draft) return <p className="archive-empty">Loading report…</p>;
   return (
     <div className="report-editor">
-      <div className={`report-status ${final ? 'final' : ''}`}>
-        <Icon name={final ? 'check' : 'report'} size={15} />
-        {final
-          ? `Final · ${report.finalizedBy?.name || ''} · ${new Date(report.finalizedAt).toLocaleString()}`
-          : `Draft${report.updatedAt ? ` · saved ${new Date(report.updatedAt).toLocaleString()}` : ''}`}
+      <div className="report-toolbar">
+        <div className={`report-status ${final ? 'final' : ''}`}>
+          <Icon name={final ? 'check' : 'report'} size={15} />
+          {final
+            ? `Final · ${report.finalizedBy?.name || ''} · ${new Date(report.finalizedAt).toLocaleString()}`
+            : `Draft${report.updatedAt ? ` · saved ${new Date(report.updatedAt).toLocaleString()}` : ''}`}
+        </div>
+        <button
+          className="primary-button"
+          disabled={final || saving || generating}
+          onClick={autoGenerate}
+          title={final ? 'This report is final. Click Reopen to regenerate it.' : undefined}
+        >
+          {generating ? <span className="spinner small" /> : <Icon name="sparkles" size={15} />}
+          {generating ? 'Writing report…' : 'Auto-generate with AI'}
+        </button>
       </div>
+      {final && (
+        <p className="form-hint">
+          This report is final and locked. Click <b>Reopen</b> below to edit it or regenerate it
+          with AI.
+        </p>
+      )}
       <div className="report-type">
         <label className="field-label" htmlFor="report-type">
           Report type
@@ -208,11 +292,14 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
           Close
         </button>
         <button
-          className="secondary-button"
+          className="text-button"
           onClick={() => window.open(`/report/${study.id}`, '_blank', 'noopener')}
         >
+          Print view
+        </button>
+        <button className="secondary-button" disabled={saving || generating} onClick={downloadPdf}>
           <Icon name="download" size={15} />
-          Print / PDF
+          Download PDF
         </button>
         {final ? (
           <button className="secondary-button" disabled={saving} onClick={() => save('draft')}>

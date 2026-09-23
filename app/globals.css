@@ -26,13 +26,15 @@ body {
 }
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 button,
 a,
 input,
-select {
+select,
+textarea {
   -webkit-tap-highlight-color: transparent;
 }
 button {
@@ -47,6 +49,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 svg g:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -79,7 +82,8 @@ h3 {
   font-weight: 500;
 }
 input,
-select {
+select,
+textarea {
   background: #0e181e;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -91,10 +95,12 @@ select {
   color: #becbd0;
 }
 select:focus,
-input:focus {
+input:focus,
+textarea:focus {
   border-color: #618d80;
 }
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--faint);
 }
 input[type='range'] {

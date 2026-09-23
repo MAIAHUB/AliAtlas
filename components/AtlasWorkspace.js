@@ -598,17 +598,20 @@ export default function AtlasWorkspace({ user }) {
       openFindingForm(draft);
     }
   }
+  // Returns whether the key image was stored. A missing key image never blocks saving the
+  // finding itself; the report shows a dash instead.
   async function storeKeyImage(finding) {
     try {
       const blob = await viewer.current?.captureFinding(finding);
-      if (!blob) return;
-      await fetch(`/api/studies/${study.id}/findings/${finding.id}/image`, {
+      if (!blob) return false;
+      const response = await fetch(`/api/studies/${study.id}/findings/${finding.id}/image`, {
         method: 'PUT',
         headers: { 'Content-Type': 'image/png' },
         body: blob,
       });
+      return response.ok;
     } catch {
-      /* The report shows a dash when a key image is missing; the finding itself is saved. */
+      return false;
     }
   }
   async function saveFinding(e) {
@@ -1454,6 +1457,21 @@ export default function AtlasWorkspace({ user }) {
                   onPhase={setPhase}
                   onMarkExtent={markExtent}
                   onClear={clearFindingPart}
+                  onKeyImage={async (finding) => {
+                    const stored = await storeKeyImage(finding);
+                    setNotice(
+                      stored
+                        ? {
+                            type: 'success',
+                            message: `Key image updated for ${finding.label}. It is used in the report and PDF.`,
+                          }
+                        : {
+                            type: 'error',
+                            message:
+                              'The key image could not be captured. Wait for the image to finish loading and try again.',
+                          },
+                    );
+                  }}
                   onReport={() => {
                     setPlaying(false);
                     setModal('report');

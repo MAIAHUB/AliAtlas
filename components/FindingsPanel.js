@@ -43,6 +43,7 @@ export default function FindingsPanel({
   onPhase,
   onMarkExtent,
   onClear,
+  onKeyImage,
 }) {
   const [scope, setScope] = useState('around');
   const indexOf = (id) => series?.frames.findIndex((x) => x.id === id) ?? -1;
@@ -304,6 +305,20 @@ export default function FindingsPanel({
             <button className="secondary-button" disabled={busy} onClick={() => onEdit(selected)}>
               Edit
             </button>
+            {selected.status === 'confirmed' && (
+              <button
+                className="secondary-button"
+                disabled={busy || selected.frameId !== frame?.id}
+                title={
+                  selected.frameId !== frame?.id
+                    ? 'Go to this finding’s image first'
+                    : 'Save the current view as the report key image'
+                }
+                onClick={() => onKeyImage(selected)}
+              >
+                Update key image
+              </button>
+            )}
             <button
               className="icon-button"
               disabled={busy}

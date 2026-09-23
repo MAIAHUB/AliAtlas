@@ -259,9 +259,42 @@ textarea.form-input {
   line-height: 1.5;
 }
 
-/* Report editor */
+/* Report editor: larger, higher-contrast text for reading and editing reports */
 .modal.wide:has(.report-editor) {
-  width: 860px;
+  width: 900px;
+}
+/* The editor scrolls as a column; children must not shrink (the lesion table would collapse). */
+.report-editor > * {
+  flex-shrink: 0;
+}
+.report-editor .field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #c9dad7;
+  margin-bottom: 6px;
+}
+.report-editor textarea.form-input {
+  font-size: 13.5px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  color: #e8f0ef;
+}
+.report-editor textarea[readonly] {
+  background: #0b1418;
+  border-color: #1f2c33;
+  color: #d9e5e3;
+}
+.report-editor .form-hint,
+.report-editor .form-error {
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.report-editor .form-hint {
+  color: #9db4b1;
+}
+.report-editor .report-type select {
+  font-size: 13px;
 }
 .report-editor {
   display: flex;
@@ -271,15 +304,27 @@ textarea.form-input {
   overflow-y: auto;
   padding-right: 4px;
 }
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.report-toolbar .report-status {
+  flex: 1;
+}
+.report-toolbar .primary-button {
+  padding: 8px 12px;
+  font-size: 11px;
+}
 .report-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: 5px;
   background: #1c2a30;
-  color: #b9cbd1;
-  font-size: 11px;
+  color: #cfdde1;
+  font-size: 12.5px;
 }
 .report-status.final {
   background: #173229;
@@ -292,8 +337,9 @@ textarea.form-input {
 }
 .report-subheading {
   margin: 6px 0 0;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2eae9;
 }
 .report-table-wrap {
   overflow-x: auto;
@@ -301,12 +347,13 @@ textarea.form-input {
 .report-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12.5px;
+  color: #e2eae9;
 }
 .report-table th {
   text-align: left;
   font-weight: 500;
-  color: var(--faint);
+  color: #9db4b8;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
 }
@@ -317,10 +364,12 @@ textarea.form-input {
 }
 .report-table small {
   display: block;
-  color: var(--muted);
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9db4b8;
 }
 .report-table img {
-  width: 120px;
+  width: 150px;
   border-radius: 4px;
   display: block;
 }

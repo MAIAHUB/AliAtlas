@@ -1,6 +1,10 @@
 const nextConfig = {
   output: process.env.ATLAS_STANDALONE === 'true' ? 'standalone' : undefined,
-  serverExternalPackages: ['dicom-parser', 'busboy', 'yauzl'],
+  serverExternalPackages: ['dicom-parser', 'busboy', 'yauzl', 'pdfkit'],
+  // pdfkit reads its standard-font metrics from disk at runtime.
+  outputFileTracingIncludes: {
+    '/api/studies/*/report/pdf': ['./node_modules/pdfkit/js/data/**/*'],
+  },
   async headers() {
     return [
       {

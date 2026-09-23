@@ -42,6 +42,11 @@ export default defineConfig({
       ORTHANC_URL: process.env.ORTHANC_URL || '',
       ORTHANC_USERNAME: process.env.ORTHANC_USERNAME || '',
       ORTHANC_PASSWORD: process.env.ORTHANC_PASSWORD || '',
+      // Next.js also loads .env files; set these explicitly so a local B.AI key is not
+      // used (or billed) by the tests unless it is passed to the test run.
+      BAI_API_KEY: process.env.BAI_API_KEY || '',
+      BAI_BASE_URL: process.env.BAI_BASE_URL || '',
+      BAI_MODEL: process.env.BAI_MODEL || '',
     },
   },
 });
