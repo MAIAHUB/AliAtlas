@@ -11,6 +11,12 @@ import {
   structureCategory,
 } from '../lib/catalog.js';
 import { clamp } from '../lib/geometry.js';
+import { jobTiming, formatDuration } from '../lib/job-timing.js';
+import { FINDING_CATEGORIES, formatSize, lineLength } from '../lib/measure.js';
+import { classifyPhase, approximateSizes } from '../lib/contrast.js';
+import { formatHu } from '../lib/roi.js';
+import FindingsPanel from './FindingsPanel.js';
+import ReportEditor from './ReportEditor.js';
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -93,6 +99,95 @@ function Tool({ icon, children, active, onClick, disabled, title }) {
   );
 }
 
+// Live clock for an anatomy job: elapsed, remaining, and time per model step.
+function JobTimer({ job }) {
+  const [now, setNow] = useState(() => new Date().toISOString());
+  const active = ['queued', 'running'].includes(job.status);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(new Date().toISOString()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  const t = jobTiming(job, now);
+  const failed = job.status === 'failed';
+  return (
+    <div className={`job-timer ${job.status}`} role="status" aria-label="Anatomy job timing">
+      {job.status === 'queued' ? (
+        <div className="job-clock">
+          <div>
+            <small>Waiting for worker</small>
+            <b className="mono">{formatDuration(t.queued)}</b>
+          </div>
+        </div>
+      ) : t.finished ? (
+        <div className="job-clock">
+          <div>
+            <small>{failed ? 'Stopped after' : 'Total time'}</small>
+            <b className="mono">{formatDuration(t.elapsed)}</b>
+          </div>
+          <div>
+            <small>Finished at</small>
+            <b className="mono">
+              {job.finishedAt
+                ? new Date(job.finishedAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '—'}
+            </b>
+          </div>
+        </div>
+      ) : (
+        <div className="job-clock">
+          <div>
+            <small>Elapsed</small>
+            <b className="mono">{formatDuration(t.elapsed)}</b>
+          </div>
+          <div>
+            <small>Remaining</small>
+            <b className="mono">
+              {t.remaining != null ? `~${formatDuration(t.remaining)}` : 'Learning'}
+            </b>
+          </div>
+        </div>
+      )}
+      {!t.finished && <progress value={t.progress} max="100" />}
+      <p className={failed ? 'job-error' : ''}>
+        {job.message}
+        {job.status === 'completed' && job.device ? ` · ${job.device.toUpperCase()}` : ''}
+      </p>
+      {t.remaining == null && job.status === 'running' && (
+        <p className="job-hint">
+          First run on this machine: time estimates appear once each model step has run once.
+        </p>
+      )}
+      {t.steps.length > 0 && (
+        <ol className="job-steps">
+          {t.steps.map((step) => (
+            <li key={step.id} className={step.state}>
+              <i aria-hidden="true" />
+              <span>{step.label}</span>
+              <span className="mono">
+                {step.state === 'pending'
+                  ? step.estimateSeconds != null
+                    ? `~${formatDuration(step.estimateSeconds)}`
+                    : ''
+                  : formatDuration(step.seconds)}
+                {step.state === 'running' && step.estimateSeconds != null
+                  ? ` / ~${formatDuration(step.estimateSeconds)}`
+                  : ''}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {t.queued >= 1 && job.startedAt && (
+        <p className="job-hint">Queued for {formatDuration(t.queued)} before starting.</p>
+      )}
+    </div>
+  );
+}
+
 export default function AtlasWorkspace({ user }) {
   const [studies, setStudies] = useState([]),
     [study, setStudy] = useState(null),
@@ -129,6 +224,14 @@ export default function AtlasWorkspace({ user }) {
     [draft, setDraft] = useState(null),
     [labelError, setLabelError] = useState('');
   const [sideOpen, setSideOpen] = useState(true);
+  const [findings, setFindings] = useState([]),
+    [panel, setPanel] = useState('structures'),
+    [selectedFindingId, setSelectedFindingId] = useState(null),
+    [measureDraft, setMeasureDraft] = useState(null),
+    [findingForm, setFindingForm] = useState(null),
+    [findingError, setFindingError] = useState(''),
+    [detecting, setDetecting] = useState(false),
+    [vision, setVision] = useState({ configured: false });
   const fileInput = useRef(null),
     folderInput = useRef(null),
     annotationInput = useRef(null),
@@ -214,14 +317,19 @@ export default function AtlasWorkspace({ user }) {
     setRecords([]);
     setJobs([]);
     setSelectedId(null);
+    setFindings([]);
+    setSelectedFindingId(null);
+    setMeasureDraft(null);
     try {
-      const [next, annotations, jobResult] = await Promise.all([
+      const [next, annotations, jobResult, findingResult] = await Promise.all([
         api(`/api/studies/${id}`),
         api(`/api/studies/${id}/annotations`),
         api(`/api/studies/${id}/jobs`),
+        api(`/api/studies/${id}/findings`),
       ]);
       if (run !== sequence.current) return;
       setStudy(next);
+      setFindings(findingResult.records);
       annotationRevision.current = annotations.revision;
       setRecords(annotations.records);
       setJobs(jobResult.jobs);
@@ -245,6 +353,7 @@ export default function AtlasWorkspace({ user }) {
     setStudies(workspace.studies);
     setAi(workspace.ai);
     setArchive(workspace.archive);
+    setVision(workspace.vision);
     setInitialized(true);
     return workspace;
   }
@@ -259,6 +368,7 @@ export default function AtlasWorkspace({ user }) {
         setStudies(w.studies);
         setAi(w.ai);
         setArchive(w.archive);
+        setVision(w.vision);
         setInitialized(true);
         if (w.studies[0]) openStudy(w.studies[0].id);
       })
@@ -338,6 +448,8 @@ export default function AtlasWorkspace({ user }) {
           'a',
           'r',
           'l',
+          'm',
+          'h',
         ].includes(key)
       )
         e.preventDefault();
@@ -348,6 +460,9 @@ export default function AtlasWorkspace({ user }) {
       if (key === 'p') setMode('pan');
       if (key === 'w') setMode('window');
       if (key === 'a') setMode('label');
+      if (key === 'm') setMode('measure');
+      if (key === 'h') setMode('roi');
+      if (key === 'escape') setMeasureDraft(null);
       if (key === 'r') k.resetView();
       if (key === 'l') setShowLabels(!k.showLabels);
       if (key === '+' || key === '=') setZoom(clamp(k.zoom * 1.2, 0.25, 8));
@@ -356,6 +471,260 @@ export default function AtlasWorkspace({ user }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+  const frameFindings = findings.filter((f) => f.frameId === frame?.id);
+  const phase = series ? classifyPhase(series) : null,
+    approx = series ? approximateSizes(series) : false;
+  function findingSummary(form) {
+    const size =
+      form.id || !form.long
+        ? form
+        : {
+            longMm: lineLength(frame, form.long).value,
+            shortMm: lineLength(frame, form.short)?.value ?? null,
+            unit: lineLength(frame, form.long).unit,
+          };
+    const parts = [];
+    if (size.longMm != null) parts.push(`Size ${formatSize(size, { approx })}`);
+    if (form.roi?.stats) parts.push(`Density ${formatHu(form.roi.stats)}`);
+    parts.push(approx ? 'plain CT: sizes are approximate' : 'measured from the scan');
+    return parts.join(' · ');
+  }
+  async function patchFinding(body) {
+    const result = await api(`/api/studies/${study.id}/findings`, { method: 'PATCH', body });
+    setFindings(result.records);
+    return result.records.find((f) => f.id === body.id);
+  }
+  // A density circle is added to the selected finding on this slice, or starts a new one.
+  async function measuredRoi(roi) {
+    const target = findings.find((f) => f.id === selectedFindingId && f.frameId === frame.id);
+    if (!target) {
+      openFindingForm({
+        seriesId,
+        frameId: frame.id,
+        long: null,
+        short: null,
+        roi,
+        category: 'other',
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await patchFinding({
+        id: target.id,
+        roi: { center: roi.center, radius: roi.radius },
+      });
+      setMode('scroll');
+      setNotice({
+        type: 'success',
+        message: `Density added to ${updated.label}: ${formatHu(updated.roi.stats)}.`,
+      });
+      await storeKeyImage(updated);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  // Top and bottom slice of a lesion give its craniocaudal size; the other end
+  // defaults to the slice where the lesion was measured.
+  async function markExtent(finding, edge) {
+    const other =
+      edge === 'first'
+        ? finding.extent?.lastFrameId || finding.frameId
+        : finding.extent?.firstFrameId || finding.frameId;
+    setSaving(true);
+    try {
+      await patchFinding({
+        id: finding.id,
+        extent:
+          edge === 'first'
+            ? { firstFrameId: frame.id, lastFrameId: other }
+            : { firstFrameId: other, lastFrameId: frame.id },
+      });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function clearFindingPart(finding, part) {
+    setSaving(true);
+    try {
+      await patchFinding({ id: finding.id, [part]: null });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function setPhase(next) {
+    setSaving(true);
+    try {
+      const updated = await api(`/api/studies/${study.id}`, {
+        method: 'PATCH',
+        body: { seriesId, phase: next },
+      });
+      setStudy(updated);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  function startMeasure() {
+    setPlaying(false);
+    setMeasureDraft(null);
+    setMode('measure');
+    setPanel('findings');
+  }
+  function openFindingForm(draft) {
+    setFindingError('');
+    setFindingForm({
+      label: `Lesion ${findings.filter((f) => f.status !== 'rejected').length + 1}`,
+      category: 'mass',
+      note: '',
+      ...draft,
+    });
+    setModal('finding');
+  }
+  // First drag = long axis, second drag = short axis, then name the finding.
+  function measured(line) {
+    if (!measureDraft || measureDraft.frameId !== frame.id)
+      setMeasureDraft({ seriesId, frameId: frame.id, long: line, short: null });
+    else {
+      const draft = { ...measureDraft, short: line };
+      setMeasureDraft(draft);
+      openFindingForm(draft);
+    }
+  }
+  async function storeKeyImage(finding) {
+    try {
+      const blob = await viewer.current?.captureFinding(finding);
+      if (!blob) return;
+      await fetch(`/api/studies/${study.id}/findings/${finding.id}/image`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/png' },
+        body: blob,
+      });
+    } catch {
+      /* The report shows a dash when a key image is missing; the finding itself is saved. */
+    }
+  }
+  async function saveFinding(e) {
+    e.preventDefault();
+    setSaving(true);
+    setFindingError('');
+    try {
+      let saved;
+      if (findingForm.id) {
+        const result = await api(`/api/studies/${study.id}/findings`, {
+          method: 'PATCH',
+          body: {
+            id: findingForm.id,
+            label: findingForm.label,
+            category: findingForm.category,
+            note: findingForm.note,
+          },
+        });
+        setFindings(result.records);
+        saved = result.records.find((f) => f.id === findingForm.id);
+      } else {
+        const result = await api(`/api/studies/${study.id}/findings`, {
+          method: 'POST',
+          body: findingForm,
+        });
+        setFindings(result.records);
+        saved = result.created;
+        setMeasureDraft(null);
+        setMode('scroll');
+      }
+      setModal(null);
+      setSelectedFindingId(saved.id);
+      setPanel('findings');
+      if (saved.status === 'confirmed') await storeKeyImage(saved);
+    } catch (err) {
+      setFindingError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function reviewFinding(finding, status) {
+    setSaving(true);
+    try {
+      const result = await api(`/api/studies/${study.id}/findings`, {
+        method: 'PATCH',
+        body: { id: finding.id, status },
+      });
+      setFindings(result.records);
+      const updated = result.records.find((f) => f.id === finding.id);
+      if (status === 'confirmed') await storeKeyImage(updated);
+      else setSelectedFindingId(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function deleteFinding(finding) {
+    if (!window.confirm(`Delete "${finding.label}"?`)) return;
+    setSaving(true);
+    try {
+      const result = await api(`/api/studies/${study.id}/findings`, {
+        method: 'DELETE',
+        body: { id: finding.id },
+      });
+      setFindings(result.records);
+      setSelectedFindingId(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  function selectFinding(finding) {
+    setSelectedFindingId(finding.id);
+    const target = series?.frames.findIndex((f) => f.id === finding.frameId);
+    if (target >= 0) setIndex(target);
+  }
+  function detectFrames(scope) {
+    const frames = series.frames;
+    if (scope === 'slice') return [frame.id];
+    if (scope === 'around')
+      return frames
+        .slice(Math.max(0, index - 7), Math.min(frames.length, index + 8))
+        .map((f) => f.id);
+    const count = Math.min(16, frames.length);
+    return [
+      ...new Set(
+        Array.from(
+          { length: count },
+          (_, i) => frames[Math.round((i * (frames.length - 1)) / Math.max(1, count - 1))].id,
+        ),
+      ),
+    ];
+  }
+  async function detect(scope) {
+    setDetecting(true);
+    setNotice(null);
+    try {
+      const result = await api(`/api/studies/${study.id}/analyze`, {
+        method: 'POST',
+        body: { seriesId, frameIds: detectFrames(scope), window: windowing },
+      });
+      setFindings(result.records);
+      const first = result.records.find((f) => f.id === result.created[0]);
+      if (first) selectFinding(first);
+      setNotice({
+        type: result.created.length ? 'warning' : 'success',
+        message: `b.ai ${result.created.length ? `suggested ${result.created.length} possible abnormalit${result.created.length === 1 ? 'y' : 'ies'}` : 'found no abnormality'} in ${result.seconds}s.${result.summary ? ` ${result.summary}` : ''}${result.created.length ? ' Review each suggestion before reporting.' : ''}`,
+      });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setDetecting(false);
+    }
+  }
   function startImport() {
     setPlaying(false);
     setFiles([]);
@@ -788,6 +1157,28 @@ export default function AtlasWorkspace({ user }) {
                   >
                     Add label
                   </Tool>
+                  <Tool
+                    icon="ruler"
+                    active={mode === 'measure'}
+                    disabled={!frame}
+                    onClick={startMeasure}
+                    title="Measure a lesion (M)"
+                  >
+                    Measure
+                  </Tool>
+                  <Tool
+                    icon="window"
+                    active={mode === 'roi'}
+                    disabled={!frame}
+                    onClick={() => {
+                      setPlaying(false);
+                      setMode('roi');
+                      setPanel('findings');
+                    }}
+                    title="Measure density in HU (H)"
+                  >
+                    HU
+                  </Tool>
                 </div>
                 <div className="toolbar-group viewer-options">
                   <button
@@ -831,7 +1222,60 @@ export default function AtlasWorkspace({ user }) {
                 onAdd={addLabel}
                 onSlice={changeSlice}
                 onReady={setViewerReady}
+                findings={frameFindings}
+                selectedFindingId={selectedFindingId}
+                onSelectFinding={(id) => {
+                  setSelectedFindingId(id);
+                  setPanel('findings');
+                }}
+                measureDraft={measureDraft}
+                onMeasure={measured}
+                onRoi={measuredRoi}
+                approx={approx}
+                phase={phase?.phase}
               />
+              {mode === 'roi' && frame && (
+                <div className="measure-hint" role="status">
+                  <Icon name="window" size={14} />
+                  <span>
+                    Drag from the centre of a region outward to measure its density (HU)
+                    {findings.some((f) => f.id === selectedFindingId && f.frameId === frame.id)
+                      ? ` for ${findings.find((f) => f.id === selectedFindingId).label}`
+                      : ''}
+                  </span>
+                </div>
+              )}
+              {mode === 'measure' && frame && (
+                <div className="measure-hint" role="status">
+                  <Icon name="ruler" size={14} />
+                  {measureDraft?.frameId === frame.id ? (
+                    <>
+                      <span>
+                        Long axis{' '}
+                        {formatSize(
+                          {
+                            longMm: lineLength(frame, measureDraft.long).value,
+                            unit: lineLength(frame, measureDraft.long).unit,
+                          },
+                          { approx },
+                        )}
+                        . Now drag the short axis, or
+                      </span>
+                      <button
+                        className="text-button accent"
+                        onClick={() => openFindingForm(measureDraft)}
+                      >
+                        save without it
+                      </button>
+                      <button className="text-button" onClick={() => setMeasureDraft(null)}>
+                        Redo
+                      </button>
+                    </>
+                  ) : (
+                    <span>Drag across the lesion&apos;s longest diameter</span>
+                  )}
+                </div>
+              )}
               {loading && (
                 <div className="study-loading">
                   <span className="spinner" />
@@ -969,237 +1413,288 @@ export default function AtlasWorkspace({ user }) {
               </div>
             </div>
             <aside className="structures-panel">
-              <div className="structures-heading">
-                <div>
-                  <Icon name="tag" size={17} />
-                  <h2>Structures</h2>
-                </div>
-                <span className="count-badge">{frameLabels.length}</span>
-              </div>
-              <div className="structure-tabs">
+              <div className="panel-switch" role="tablist">
                 <button
-                  className={scope === 'slice' ? 'active' : ''}
-                  onClick={() => setScope('slice')}
+                  role="tab"
+                  aria-selected={panel === 'structures'}
+                  onClick={() => setPanel('structures')}
                 >
-                  This slice
+                  Anatomy
                 </button>
                 <button
-                  className={scope === 'series' ? 'active' : ''}
-                  onClick={() => setScope('series')}
+                  role="tab"
+                  aria-selected={panel === 'findings'}
+                  onClick={() => setPanel('findings')}
                 >
-                  All slices
+                  Findings
+                  {findings.some((f) => f.status === 'unreviewed') && <i className="dot-alert" />}
                 </button>
               </div>
-              <div className="structure-search">
-                <Icon name="search" size={15} />
-                <input
-                  aria-label="Search structures"
-                  placeholder="Find a structure…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+              {panel === 'findings' ? (
+                <FindingsPanel
+                  findings={findings}
+                  series={series}
+                  frame={frame}
+                  vision={vision}
+                  detecting={detecting}
+                  busy={saving}
+                  selectedId={selectedFindingId}
+                  onSelect={selectFinding}
+                  onReview={reviewFinding}
+                  onEdit={(f) => {
+                    setFindingError('');
+                    setFindingForm({ ...f });
+                    setModal('finding');
+                  }}
+                  onDelete={deleteFinding}
+                  onDetect={detect}
+                  onMeasure={startMeasure}
+                  approx={approx}
+                  phase={phase}
+                  onPhase={setPhase}
+                  onMarkExtent={markExtent}
+                  onClear={clearFindingPart}
+                  onReport={() => {
+                    setPlaying(false);
+                    setModal('report');
+                  }}
                 />
-                {query && (
-                  <button aria-label="Clear search" onClick={() => setQuery('')}>
-                    <Icon name="close" size={13} />
-                  </button>
-                )}
-              </div>
-              <div className="category-filter">
-                <label htmlFor="category-filter">SHOW</label>
-                <select
-                  id="category-filter"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="all">All structures</option>
-                  <option value="organ">Organs & cavities</option>
-                  <option value="bone">Bones</option>
-                  <option value="vessel">Vessels</option>
-                  <option value="muscle">Muscles</option>
-                  <option value="gland">Glands</option>
-                </select>
-              </div>
-              <div className="structure-list">
-                {structureList.map((annotation) => (
-                  <button
-                    className={`structure-item ${annotation.id === selectedId ? 'selected' : ''}`}
-                    key={annotation.id}
-                    onClick={() => selectAnnotation(annotation)}
-                  >
-                    <span className="structure-dot" style={{ background: annotation.color }} />
-                    <span>
-                      <b>{annotation.label}</b>
-                      <small>
-                        {annotation.source === 'model'
-                          ? 'AI label'
-                          : annotation.source === 'imported'
-                            ? 'Imported'
-                            : 'Manual label'}
-                        {scope === 'series'
-                          ? ` · slice ${series.frames.findIndex((f) => f.id === annotation.frameId) + 1}`
-                          : ''}
-                      </small>
-                    </span>
-                    {annotation.reviewed ? (
-                      <Icon name="check" size={12} />
+              ) : (
+                <>
+                  <div className="structures-heading">
+                    <div>
+                      <Icon name="tag" size={17} />
+                      <h2>Structures</h2>
+                    </div>
+                    <span className="count-badge">{frameLabels.length}</span>
+                  </div>
+                  <div className="structure-tabs">
+                    <button
+                      className={scope === 'slice' ? 'active' : ''}
+                      onClick={() => setScope('slice')}
+                    >
+                      This slice
+                    </button>
+                    <button
+                      className={scope === 'series' ? 'active' : ''}
+                      onClick={() => setScope('series')}
+                    >
+                      All slices
+                    </button>
+                  </div>
+                  <div className="structure-search">
+                    <Icon name="search" size={15} />
+                    <input
+                      aria-label="Search structures"
+                      placeholder="Find a structure…"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                    {query && (
+                      <button aria-label="Clear search" onClick={() => setQuery('')}>
+                        <Icon name="close" size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="category-filter">
+                    <label htmlFor="category-filter">SHOW</label>
+                    <select
+                      id="category-filter"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                    >
+                      <option value="all">All structures</option>
+                      <option value="organ">Organs & cavities</option>
+                      <option value="bone">Bones</option>
+                      <option value="vessel">Vessels</option>
+                      <option value="muscle">Muscles</option>
+                      <option value="gland">Glands</option>
+                    </select>
+                  </div>
+                  <div className="structure-list">
+                    {structureList.map((annotation) => (
+                      <button
+                        className={`structure-item ${annotation.id === selectedId ? 'selected' : ''}`}
+                        key={annotation.id}
+                        onClick={() => selectAnnotation(annotation)}
+                      >
+                        <span className="structure-dot" style={{ background: annotation.color }} />
+                        <span>
+                          <b>{annotation.label}</b>
+                          <small>
+                            {annotation.source === 'model'
+                              ? 'AI label'
+                              : annotation.source === 'imported'
+                                ? 'Imported'
+                                : 'Manual label'}
+                            {scope === 'series'
+                              ? ` · slice ${series.frames.findIndex((f) => f.id === annotation.frameId) + 1}`
+                              : ''}
+                          </small>
+                        </span>
+                        {annotation.reviewed ? (
+                          <Icon name="check" size={12} />
+                        ) : (
+                          <span className="review-dot" title="Needs review" />
+                        )}
+                      </button>
+                    ))}
+                    {!structureList.length && (
+                      <div className="structures-empty">
+                        <span className="empty-tag">
+                          <Icon name="tag" size={24} />
+                        </span>
+                        <b>
+                          {query
+                            ? 'No matching structures'
+                            : frame
+                              ? 'Make anatomy visible'
+                              : 'Anatomy comes into focus here'}
+                        </b>
+                        <p>
+                          {query
+                            ? 'Try another name or category.'
+                            : frame
+                              ? 'Use Add label to identify a structure on this slice, or generate labels below.'
+                              : 'Import a study to view and annotate its structures.'}
+                        </p>
+                        {frame && !query && (
+                          <button
+                            className="text-button accent"
+                            onClick={() => {
+                              setMode('label');
+                              setShowLabels(true);
+                            }}
+                          >
+                            Add your first label
+                            <Icon name="plus" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {selected && (
+                    <div className="annotation-detail">
+                      <div>
+                        <span className="eyebrow">SELECTED STRUCTURE</span>
+                        <button
+                          className="icon-button"
+                          aria-label="Deselect label"
+                          onClick={() => setSelectedId(null)}
+                        >
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
+                      <b>{selected.label}</b>
+                      <p>
+                        {selected.source === 'model'
+                          ? `${selected.model?.name || 'AI model'} · ${selected.reviewed ? 'Reviewed' : 'Needs review'}`
+                          : selected.source === 'manual'
+                            ? 'Manually placed on this slice'
+                            : 'Imported · verify this placement'}
+                      </p>
+                      <div className="annotation-actions">
+                        <button className="secondary-button" disabled={saving} onClick={editLabel}>
+                          Edit
+                        </button>
+                        {!selected.reviewed && (
+                          <button
+                            className="secondary-button"
+                            disabled={saving}
+                            onClick={() => updateAnnotation(selected, 'PATCH', { reviewed: true })}
+                          >
+                            <Icon name="check" size={13} />
+                            Reviewed
+                          </button>
+                        )}
+                        <button
+                          className="icon-button danger"
+                          disabled={saving}
+                          aria-label="Delete selected label"
+                          onClick={() => updateAnnotation(selected, 'DELETE')}
+                        >
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="ai-section">
+                    <div className="ai-heading">
+                      <span>
+                        <Icon name="sparkles" size={16} />
+                        Anatomy assist
+                      </span>
+                      <span className={`ai-state ${ai.ready ? 'ready' : ''}`}>
+                        {ai.ready ? 'READY' : 'OFFLINE'}
+                      </span>
+                    </div>
+                    <label className="sr-only" htmlFor="body-region">
+                      CT region
+                    </label>
+                    <select
+                      id="body-region"
+                      value={region}
+                      disabled={busyJob}
+                      onChange={(e) => setRegion(e.target.value)}
+                    >
+                      {REGIONS.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="generate-button"
+                      disabled={
+                        !series || !ai.ready || !!series?.segmentationIssue || busyJob || saving
+                      }
+                      onClick={generate}
+                    >
+                      <Icon name="sparkles" size={15} />
+                      {busyJob ? 'Processing anatomy…' : 'Generate anatomy labels'}
+                    </button>
+                    {activeJob && (busyJob || activeJob.steps) ? (
+                      <JobTimer job={activeJob} />
+                    ) : activeJob ? (
+                      <p className={activeJob.status === 'failed' ? 'job-error' : ''}>
+                        {activeJob.message}
+                      </p>
                     ) : (
-                      <span className="review-dot" title="Needs review" />
-                    )}
-                  </button>
-                ))}
-                {!structureList.length && (
-                  <div className="structures-empty">
-                    <span className="empty-tag">
-                      <Icon name="tag" size={24} />
-                    </span>
-                    <b>
-                      {query
-                        ? 'No matching structures'
-                        : frame
-                          ? 'Make anatomy visible'
-                          : 'Anatomy comes into focus here'}
-                    </b>
-                    <p>
-                      {query
-                        ? 'Try another name or category.'
-                        : frame
-                          ? 'Use Add label to identify a structure on this slice, or generate labels below.'
-                          : 'Import a study to view and annotate its structures.'}
-                    </p>
-                    {frame && !query && (
-                      <button
-                        className="text-button accent"
-                        onClick={() => {
-                          setMode('label');
-                          setShowLabels(true);
-                        }}
-                      >
-                        Add your first label
-                        <Icon name="plus" size={14} />
-                      </button>
+                      <p>
+                        {!ai.ready
+                          ? 'Automatic labeling is unavailable on this server. Manual labels are ready to use.'
+                          : series?.segmentationIssue ||
+                            'Generated labels are suggestions. Review their placement before teaching.'}
+                      </p>
                     )}
                   </div>
-                )}
-              </div>
-              {selected && (
-                <div className="annotation-detail">
-                  <div>
-                    <span className="eyebrow">SELECTED STRUCTURE</span>
+                  <div className="annotation-file-actions">
                     <button
-                      className="icon-button"
-                      aria-label="Deselect label"
-                      onClick={() => setSelectedId(null)}
+                      className="text-button"
+                      disabled={!study || saving}
+                      onClick={exportLabels}
                     >
-                      <Icon name="close" size={13} />
+                      <Icon name="download" size={13} />
+                      Export labels
                     </button>
-                  </div>
-                  <b>{selected.label}</b>
-                  <p>
-                    {selected.source === 'model'
-                      ? `${selected.model?.name || 'AI model'} · ${selected.reviewed ? 'Reviewed' : 'Needs review'}`
-                      : selected.source === 'manual'
-                        ? 'Manually placed on this slice'
-                        : 'Imported · verify this placement'}
-                  </p>
-                  <div className="annotation-actions">
-                    <button className="secondary-button" disabled={saving} onClick={editLabel}>
-                      Edit
-                    </button>
-                    {!selected.reviewed && (
-                      <button
-                        className="secondary-button"
-                        disabled={saving}
-                        onClick={() => updateAnnotation(selected, 'PATCH', { reviewed: true })}
-                      >
-                        <Icon name="check" size={13} />
-                        Reviewed
-                      </button>
-                    )}
                     <button
-                      className="icon-button danger"
-                      disabled={saving}
-                      aria-label="Delete selected label"
-                      onClick={() => updateAnnotation(selected, 'DELETE')}
+                      className="text-button"
+                      disabled={!study || saving}
+                      onClick={() => annotationInput.current.click()}
                     >
-                      <Icon name="trash" size={14} />
+                      <Icon name="upload" size={13} />
+                      Import labels
                     </button>
+                    <input
+                      ref={annotationInput}
+                      className="sr-only"
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={(e) => importLabels(e.target.files[0])}
+                    />
                   </div>
-                </div>
+                </>
               )}
-              <div className="ai-section">
-                <div className="ai-heading">
-                  <span>
-                    <Icon name="sparkles" size={16} />
-                    Anatomy assist
-                  </span>
-                  <span className={`ai-state ${ai.ready ? 'ready' : ''}`}>
-                    {ai.ready ? 'READY' : 'OFFLINE'}
-                  </span>
-                </div>
-                <label className="sr-only" htmlFor="body-region">
-                  CT region
-                </label>
-                <select
-                  id="body-region"
-                  value={region}
-                  disabled={busyJob}
-                  onChange={(e) => setRegion(e.target.value)}
-                >
-                  {REGIONS.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="generate-button"
-                  disabled={
-                    !series || !ai.ready || !!series?.segmentationIssue || busyJob || saving
-                  }
-                  onClick={generate}
-                >
-                  <Icon name="sparkles" size={15} />
-                  {busyJob ? 'Processing anatomy…' : 'Generate anatomy labels'}
-                </button>
-                {busyJob ? (
-                  <div className="job-progress">
-                    <progress value={activeJob.progress} max="100" />
-                    <p>{activeJob.message}</p>
-                  </div>
-                ) : activeJob ? (
-                  <p className={activeJob.status === 'failed' ? 'job-error' : ''}>
-                    {activeJob.message}
-                  </p>
-                ) : (
-                  <p>
-                    {!ai.ready
-                      ? 'Automatic labeling is unavailable on this server. Manual labels are ready to use.'
-                      : series?.segmentationIssue ||
-                        'Generated labels are suggestions. Review their placement before teaching.'}
-                  </p>
-                )}
-              </div>
-              <div className="annotation-file-actions">
-                <button className="text-button" disabled={!study || saving} onClick={exportLabels}>
-                  <Icon name="download" size={13} />
-                  Export labels
-                </button>
-                <button
-                  className="text-button"
-                  disabled={!study || saving}
-                  onClick={() => annotationInput.current.click()}
-                >
-                  <Icon name="upload" size={13} />
-                  Import labels
-                </button>
-                <input
-                  ref={annotationInput}
-                  className="sr-only"
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={(e) => importLabels(e.target.files[0])}
-                />
-              </div>
             </aside>
           </div>
           <footer className="workspace-footer">
@@ -1518,6 +2013,89 @@ export default function AtlasWorkspace({ user }) {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {modal === 'finding' && findingForm && (
+        <Modal
+          title={findingForm.id ? 'Edit finding' : 'Record a finding'}
+          subtitle={findingSummary(findingForm)}
+          onClose={() => setModal(null)}
+          locked={saving}
+        >
+          <form onSubmit={saveFinding}>
+            <label className="field-label" htmlFor="finding-name">
+              Finding name
+            </label>
+            <input
+              id="finding-name"
+              className="form-input"
+              autoFocus
+              required
+              maxLength={80}
+              value={findingForm.label}
+              onChange={(e) => setFindingForm({ ...findingForm, label: e.target.value })}
+            />
+            <div className="form-two-columns">
+              <div>
+                <label className="field-label" htmlFor="finding-category">
+                  Category
+                </label>
+                <select
+                  id="finding-category"
+                  value={findingForm.category}
+                  onChange={(e) => setFindingForm({ ...findingForm, category: e.target.value })}
+                >
+                  {FINDING_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <label className="field-label finding-note-label" htmlFor="finding-note">
+              Description (optional)
+            </label>
+            <textarea
+              id="finding-note"
+              className="form-input"
+              rows={3}
+              maxLength={1000}
+              placeholder="e.g. Well-defined hypodense lesion in segment VI"
+              value={findingForm.note}
+              onChange={(e) => setFindingForm({ ...findingForm, note: e.target.value })}
+            />
+            {findingError && (
+              <p className="form-error" role="alert">
+                {findingError}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="text-button"
+                disabled={saving}
+                onClick={() => setModal(null)}
+              >
+                Cancel
+              </button>
+              <button className="primary-button" disabled={saving}>
+                {saving ? <span className="spinner small" /> : <Icon name="check" size={15} />}
+                Save finding
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {modal === 'report' && study && (
+        <Modal title="CT report" subtitle={study.title} onClose={() => setModal(null)} wide>
+          <ReportEditor
+            study={study}
+            findings={findings}
+            api={api}
+            onClose={() => setModal(null)}
+            onError={fail}
+          />
         </Modal>
       )}
       {modal === 'delete' && (

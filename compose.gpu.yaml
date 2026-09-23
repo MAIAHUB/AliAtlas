@@ -2,7 +2,11 @@ services:
   worker:
     build:
       args:
-        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu128
+        # CUDA 11.8 builds also run on older drivers, e.g. driver 546 (CUDA 12.3).
+        # With a driver that supports CUDA 12.8, cu128 with torch 2.8.0 also works.
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu118
+        TORCH_VERSION: 2.7.1
+        TORCHVISION_VERSION: 0.22.1
     environment:
       ATLAS_AI_DEVICE: gpu
     deploy:

@@ -1,4 +1,5 @@
 import './globals.css';
+import './findings.css';
 export const metadata = {
   title: 'AliAtlas · Anatomy workspace',
   description: 'Explore CT anatomy, one slice at a time.',

@@ -82,3 +82,49 @@ test('places labels in non-overlapping columns beside the image', () => {
   assert.ok(right.x >= 700 && right.x <= 730, 'right column hugs image');
   assert.equal(placed.find((p) => p.id === 'l0').lines.length, 2);
 });
+
+test('reports elapsed, remaining and learned per-step estimates for anatomy jobs', async () => {
+  const { learn, estimateFor, statsKey, jobTiming, formatDuration } = await import(
+    '../lib/job-timing.js'
+  );
+  let stats = learn({}, statsKey('total', 'gpu', true), 60, 120);
+  stats = learn(stats, statsKey('total', 'gpu', true), 120, 120);
+  assert.equal(estimateFor(stats, statsKey('total', 'gpu', true), 200), 150);
+  assert.equal(estimateFor(stats, statsKey('total', 'cpu', true), 200), null);
+  const job = {
+    status: 'running',
+    createdAt: '2026-01-01T00:00:00Z',
+    startedAt: '2026-01-01T00:00:05Z',
+    steps: [
+      { id: 'prepare', startedAt: '2026-01-01T00:00:05Z', finishedAt: '2026-01-01T00:00:10Z' },
+      {
+        id: 'a',
+        estimated: true,
+        estimateSeconds: 100,
+        startedAt: '2026-01-01T00:00:10Z',
+        finishedAt: '2026-01-01T00:01:30Z',
+      },
+      { id: 'b', estimated: true, estimateSeconds: 200, startedAt: '2026-01-01T00:01:30Z' },
+      { id: 'c', estimated: true, estimateSeconds: 50 },
+      { id: 'save' },
+    ],
+  };
+  const t = jobTiming(job, '2026-01-01T00:02:30Z');
+  assert.equal(t.queued, 5);
+  assert.equal(t.elapsed, 145);
+  assert.equal(t.remaining, 140 + 50);
+  assert.deepEqual(
+    t.steps.map((s) => s.state),
+    ['done', 'done', 'running', 'pending', 'pending'],
+  );
+  assert.equal(t.steps[2].seconds, 60);
+  assert.equal(
+    jobTiming(
+      { ...job, steps: [...job.steps.slice(0, 3), { id: 'c', estimated: true }] },
+      '2026-01-01T00:02:30Z',
+    ).remaining,
+    null,
+  );
+  assert.equal(formatDuration(65), '1:05');
+  assert.equal(formatDuration(3725), '1:02:05');
+});

@@ -2,11 +2,21 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 ARG TORCH_VERSION=2.8.0
+# Must match TORCH_VERSION (see pytorch.org/get-started/previous-versions).
+ARG TORCHVISION_VERSION=0.23.0
 ARG TOTALSEG_VERSION=2.11.0
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv dcm2niix libgdcm-tools libgomp1 && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/anatomy
 ENV PATH=/opt/anatomy/bin:$PATH
-RUN pip install --no-cache-dir torch==${TORCH_VERSION} --index-url ${TORCH_INDEX_URL} && pip install --no-cache-dir TotalSegmentator==${TOTALSEG_VERSION}
+# Debian's pip 23 rejects current wheels with normalized names (e.g. typing_extensions).
+RUN pip install --no-cache-dir --upgrade pip
+# TotalSegmentator pulls torchvision (via timm) unpinned; without these constraints
+# pip would replace the CUDA build selected here with the newest PyPI torch.
+RUN echo "torch==${TORCH_VERSION}" > /opt/torch-constraints.txt \
+  && echo "torchvision==${TORCHVISION_VERSION}" >> /opt/torch-constraints.txt \
+  && pip install --no-cache-dir torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} --index-url ${TORCH_INDEX_URL} \
+  && pip install --no-cache-dir -c /opt/torch-constraints.txt TotalSegmentator==${TOTALSEG_VERSION} \
+  && python -c "import torch, torchvision; print('torch', torch.__version__, 'torchvision', torchvision.__version__)"
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY lib ./lib

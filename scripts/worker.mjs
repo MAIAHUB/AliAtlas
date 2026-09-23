@@ -15,6 +15,7 @@ import { labelsFromNifti } from '../lib/segmentation.js';
 import { mutateAnnotations } from '../lib/annotations.js';
 import { segmentationEligibility } from '../lib/dicom.js';
 import { assert } from '../lib/errors.js';
+import { statsKey, learn, estimateFor } from '../lib/job-timing.js';
 
 const controller = new AbortController();
 let stopped = false,
@@ -24,6 +25,11 @@ const python = process.env.ATLAS_PYTHON_BIN || 'python3';
 const command = process.env.ATLAS_TOTALSEG_BIN || 'TotalSegmentator';
 const lockFile = path.join(dataRoot(), 'worker.lock');
 const heartbeatFile = path.join(dataRoot(), 'worker.json');
+// Learned seconds-per-slice for each task on this machine, used for time estimates.
+const statsFile = path.join(dataRoot(), 'job-stats.json');
+const device = () => process.env.ATLAS_AI_DEVICE || 'cpu';
+const fast = () => process.env.ATLAS_AI_FAST === 'true';
+const now = () => new Date().toISOString();
 process.env.TOTALSEG_HOME_DIR ||= path.join(dataRoot(), 'models');
 async function heartbeat(ready, message) {
   await writeJson(heartbeatFile, {
@@ -65,9 +71,29 @@ async function update(job, changes) {
 async function runJob(job) {
   const work = path.join(dataRoot(), 'jobs', job.id),
     input = path.join(work, 'input');
+  let stats = await readJson(statsFile).catch(() => ({}));
+  const step = (id) => job.steps.find((s) => s.id === id);
   try {
     const study = await loadStudy(job.owner, job.studyId),
       series = getSeries(study, job.seriesId);
+    const frames = series.frames.length;
+    await update(job, {
+      status: 'running',
+      startedAt: now(),
+      frameCount: frames,
+      device: device(),
+      message: 'Preparing scan',
+      steps: [
+        { id: 'prepare', label: 'Preparing scan', startedAt: now() },
+        ...job.tasks.map((task) => ({
+          id: task,
+          label: `Segmenting ${task.replaceAll('_', ' ')}`,
+          estimated: true,
+          estimateSeconds: estimateFor(stats, statsKey(task, device(), fast()), frames),
+        })),
+        { id: 'save', label: 'Saving labels' },
+      ],
+    });
     const issue = segmentationEligibility(series);
     assert(!issue, issue, 422);
     await fs.mkdir(input, { recursive: true, mode: 0o700 });
@@ -75,6 +101,7 @@ async function runJob(job) {
       const src = path.join(seriesDir(job.owner, job.studyId, job.seriesId), `${fileId}.dcm`);
       await fs.copyFile(src, path.join(input, `${fileId}.dcm`));
     }
+    step('prepare').finishedAt = now();
     const records = [];
     for (let index = 0; index < job.tasks.length; index++) {
       const task = job.tasks[index];
@@ -83,8 +110,8 @@ async function runJob(job) {
         `Installed TotalSegmentator does not support ${task}. Update the model runtime.`,
         422,
       );
+      step(task).startedAt = now();
       await update(job, {
-        status: 'running',
         progress: Math.round((index / job.tasks.length) * 90),
         message: `Segmenting ${task.replaceAll('_', ' ')} (${index + 1}/${job.tasks.length})`,
       });
@@ -120,7 +147,19 @@ async function runJob(job) {
         })),
       );
       await fs.unlink(output);
+      const done = step(task);
+      done.finishedAt = now();
+      stats = learn(
+        stats,
+        statsKey(task, device(), fast()),
+        (Date.parse(done.finishedAt) - Date.parse(done.startedAt)) / 1000,
+        frames,
+      );
+      await writeJson(statsFile, stats).catch(() => {});
+      await update(job, {});
     }
+    step('save').startedAt = now();
+    await update(job, { message: 'Saving labels' });
     assert(
       records.length,
       'The model found no supported structures in this series. Review the scan and selected region.',
@@ -139,15 +178,18 @@ async function runJob(job) {
           ),
       ),
     ]);
+    step('save').finishedAt = now();
     await update(job, {
       status: 'completed',
       progress: 100,
+      finishedAt: now(),
       message: `${records.length} slice labels ready for review`,
       labelCount: records.length,
     });
   } catch (error) {
     await update(job, {
       status: 'failed',
+      finishedAt: now(),
       message: stopped
         ? 'Processing stopped. Start a new job after the worker restarts.'
         : error.code === 'ENOENT'
@@ -188,6 +230,7 @@ async function main() {
         await update(job, {
           status: 'failed',
           progress: 0,
+          finishedAt: job.updatedAt,
           message: 'Processing was interrupted by a server restart. Start a new job.',
         });
     }

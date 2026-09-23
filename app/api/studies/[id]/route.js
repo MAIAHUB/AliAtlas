@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { sameOrigin, json, route } from '../../../../lib/http.js';
+import { sameOrigin, json, route, readBody } from '../../../../lib/http.js';
 import { requireUser } from '../../../../lib/auth.js';
 import { audit } from '../../../../lib/db.js';
 import {
@@ -10,7 +10,10 @@ import {
   withLock,
   jobPath,
   dataRoot,
+  getSeries,
+  writeJson,
 } from '../../../../lib/storage.js';
+import { PHASES } from '../../../../lib/contrast.js';
 import { listJobs } from '../../../../lib/jobs.js';
 import { assert } from '../../../../lib/errors.js';
 export const runtime = 'nodejs';
@@ -18,6 +21,27 @@ export const GET = route(async (request, { params }) => {
   const { owner } = await requireUser(request),
     { id } = await params;
   return json(publicStudy(await loadStudy(owner, id)));
+});
+// Correct a series' contrast phase when DICOM tags are missing or wrong ("auto" clears it).
+export const PATCH = route(async (request, { params }) => {
+  sameOrigin(request);
+  const { user, owner } = await requireUser(request),
+    { id } = await params,
+    input = await readBody(request);
+  assert(
+    input.phase === 'auto' || PHASES.some((p) => p.id === input.phase && p.id !== 'unknown'),
+    'Choose a contrast phase.',
+  );
+  const study = await withLock(studyDir(owner, id), async () => {
+    const current = await loadStudy(owner, id),
+      series = getSeries(current, input.seriesId);
+    if (input.phase === 'auto') delete series.phaseOverride;
+    else series.phaseOverride = input.phase;
+    await writeJson(path.join(studyDir(owner, id), 'study.json'), current);
+    return current;
+  });
+  await audit(user.id, 'series.phase', { studyId: id, phase: input.phase });
+  return json(publicStudy(study));
 });
 export const DELETE = route(async (request, { params }) => {
   sameOrigin(request);

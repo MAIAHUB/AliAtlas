@@ -54,6 +54,10 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USERNAME: ${ORTHANC_USERNAME:-aliatlas}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-aliatlas-dev-password}
+      BAI_API_KEY: ${BAI_API_KEY:-}
+      BAI_BASE_URL: ${BAI_BASE_URL:-}
+      BAI_MODEL: ${BAI_MODEL:-}
+      BAI_API_STYLE: ${BAI_API_STYLE:-openai}
     volumes:
       - atlas-data:/app/data
     restart: unless-stopped

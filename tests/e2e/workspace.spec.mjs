@@ -194,6 +194,39 @@ test('isolates workspaces and validates writes and pixel responses', async ({ pl
     expect(batchBody.length).toBe(2 * frame.rows * frame.columns * 2);
     expect(batchBody.readInt16LE(0)).toBe(40);
     expect((await two.get(slices)).status()).toBe(404);
+    // Findings and reports are private to the study owner; sizes come from pixel spacing.
+    const finding = await one.post(`/api/studies/${id}/findings`, {
+      data: {
+        seriesId: series.id,
+        frameId: frame.id,
+        label: 'Test lesion',
+        category: 'mass',
+        long: [
+          [2, 2],
+          [12, 2],
+        ],
+      },
+    });
+    expect(finding.status()).toBe(201);
+    expect((await finding.json()).created.longMm).toBe(10);
+    expect((await two.get(`/api/studies/${id}/findings`)).status()).toBe(404);
+    expect((await two.get(`/api/studies/${id}/report`)).status()).toBe(404);
+    expect(
+      (
+        await two.post(`/api/studies/${id}/findings`, {
+          data: { seriesId: series.id, frameId: frame.id, label: 'x', category: 'mass' },
+        })
+      ).status(),
+    ).toBe(404);
+    expect((await one.get(`/api/studies/${id}/report`)).status()).toBe(200);
+    if (!process.env.BAI_API_KEY)
+      expect(
+        (
+          await one.post(`/api/studies/${id}/analyze`, {
+            data: { seriesId: series.id, frameIds: [frame.id] },
+          })
+        ).status(),
+      ).toBe(503);
     expect((await two.get(`/api/studies/${id}`)).status()).toBe(404);
     expect(
       (await two.get(`/api/studies/${id}/pixels?series=${series.id}&frame=${frame.id}`)).status(),

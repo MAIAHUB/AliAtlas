@@ -72,6 +72,40 @@ Limits: 512 MB per upload, 64 MB per image after decoding, 1 GB of actual expand
 
 A **single-frame DICOM file supplies one slice**. Upload the full series to scroll through anatomy. This version displays source slices; it does not synthesize coronal/sagittal reconstructions from an axial stack.
 
+## Findings, tumour measurement and reports
+
+- **Measure** (M): drag across a lesion's longest diameter, then optionally drag the perpendicular short axis. AliAtlas computes the size in millimetres from the DICOM pixel spacing (row spacing along y, column spacing along x); sizes are always recomputed on the server. Uncalibrated images are measured in pixels and labelled `px`.
+- Each finding has a name, category (mass/tumour, nodule, lymph node, cyst, fluid, other), description, image number and a key image (the slice with its calipers) captured when it is saved or confirmed.
+- **Detect abnormalities** sends the current image, the 15 images around it, or 16 images sampled across the series to b.ai. Suggestions appear as orange dashed calipers marked for review; b.ai proposes where to measure, AliAtlas measures. Earlier unreviewed suggestions on the same images are replaced; reviewed ones are kept.
+- **Report**: clinical history, technique (prefilled from the series), findings (insertable from confirmed measurements, in slice order), impression, a lesion table with key images, and a printable page at `/report/<study>` (use the browser's _Save as PDF_). A report cannot be finalized while any AI suggestion is unreviewed; a final report records who finalized it and is read-only until reopened.
+
+### Plain (non-contrast) CT
+
+Plain CT is suitable for screening and teaching, but lesion margins and enhancement cannot be assessed. AliAtlas therefore tracks each series' contrast phase:
+
+- The phase comes from the DICOM Contrast/Bolus Agent tag or the series/protocol description (e.g. _NC_, _plain_, _arterial_, _PV_, _delayed_); otherwise it is _Contrast unknown_. A reader can correct it in **Findings → Contrast phase**. The viewer shows the phase as a badge.
+- On non-contrast or unknown-phase series, sizes are shown as approximate (**≈**) everywhere: viewer, findings, reports and key images.
+- Reports default to **Screening report**, with limitations and a recommendation for contrast-enhanced CT or MRI filled in. A **Diagnostic report** is only allowed when the study has a contrast-enhanced series (enforced on the server).
+
+**Density (HU)**: press **HU** (H) and drag from the centre of a region outward. Mean ± SD, range and area are computed on the server from the stored pixels. With a finding selected on that image, the density is added to it; otherwise a density-only finding is created. Plain-CT hints (gas, fat, fluid, soft tissue, blood, calcification ranges) are shown only when the region is homogeneous (SD ≤ 60 HU) and at least 10 pixels; after contrast, only fat and gas hints remain.
+
+**Third dimension**: for a measured lesion, go to its top and bottom images and use **Top = this image** / **Bottom = this image**. The craniocaudal size uses DICOM slice positions plus one slice interval, giving **L × W × CC**, and an ellipsoid volume estimate (π/6 × L × W × H). Coronal and sagittal reformats are not yet available.
+
+### Connect b.ai
+
+Add to `.env` (Docker) or `.env.local` (`npm run dev`):
+
+```dotenv
+BAI_API_KEY=your-key
+BAI_BASE_URL=https://api.example.com/v1
+BAI_MODEL=model-that-accepts-images
+BAI_API_STYLE=openai
+```
+
+The adapter in `lib/vision.js` calls `POST {BAI_BASE_URL}/chat/completions` with `Authorization: Bearer {BAI_API_KEY}` and PNG slices as `image_url` data URLs, and expects a JSON answer. It sends only rendered pixels, image size, pixel spacing, window and body region: no patient name, IDs, dates or DICOM UIDs. The key stays on the server. If b.ai uses a different request format, only `lib/vision.js` needs to change.
+
+AI suggestions are drafts for a qualified reader, not a diagnosis. A general-purpose vision model can miss lesions or report ones that are not there.
+
 ## Enable automatic anatomical labels
 
 DICOM metadata does not contain a ready-made list of all anatomical structures in each image. AliAtlas uses [TotalSegmentator](https://github.com/wasserth/TotalSegmentator) as an optional inference engine. The application backend and job worker remain JavaScript; the model itself requires its Python/PyTorch runtime.
@@ -184,6 +218,8 @@ Import `fixtures/ct`. These generated files are excluded from Git and are **not*
 | `lib/storage.js`, `lib/annotations.js` | Workspace ownership, atomic storage and frame-bound annotations         |
 | `lib/db.js`, `lib/auth.js`             | PostgreSQL schema, accounts, password hashing and sessions              |
 | `lib/orthanc.js`                       | Orthanc archive upload, per-account ownership and reopening             |
+| `lib/findings.js`, `lib/measure.js`    | Findings, caliper sizes in mm, review status and key images             |
+| `lib/vision.js`, `lib/report.js`       | b.ai abnormality detection adapter and structured reports               |
 | `lib/jobs.js`, `scripts/worker.mjs`    | Persistent job queue and TotalSegmentator process integration           |
 | `lib/segmentation.js`                  | NIfTI labelmap alignment and mask-contained anchors                     |
 | `tests/`                               | Synthetic fixtures, unit/integration tests and browser checks           |

@@ -3,12 +3,16 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import {
   imageTransform,
   screenToPixel,
+  pixelToScreen,
   windowPixel,
   orientationLabels,
   clamp,
 } from '../lib/geometry.js';
 import { layoutLabels, drawLabels, labelEdge, lineY } from '../lib/label-layout.js';
 import { SliceLoader } from '../lib/slice-loader.js';
+import { lineLength, formatSize } from '../lib/measure.js';
+import { roiStats, formatHu } from '../lib/roi.js';
+import { phaseInfo } from '../lib/contrast.js';
 import Icon from './Icon.js';
 
 const DicomViewer = forwardRef(function DicomViewer(
@@ -32,6 +36,14 @@ const DicomViewer = forwardRef(function DicomViewer(
     onAdd,
     onSlice,
     onReady,
+    findings = [],
+    selectedFindingId,
+    onSelectFinding,
+    measureDraft,
+    onMeasure,
+    onRoi,
+    approx = false,
+    phase,
   },
   ref,
 ) {
@@ -227,21 +239,69 @@ const DicomViewer = forwardRef(function DicomViewer(
         if (document.fullscreenElement) return document.exitFullscreen();
         return host.current.requestFullscreen();
       },
+      // Key image for a report: the displayed slice with this finding's calipers.
+      captureFinding(finding) {
+        if (!ready || error || finding.frameId !== frame?.id) return Promise.resolve(null);
+        // Crop to the visible part of the scan, not the whole viewport with its margins.
+        const left = Math.max(0, transform.x),
+          top = Math.max(0, transform.y);
+        const right = Math.min(size.width, transform.x + frame.columns * transform.sx),
+          bottom = Math.min(size.height, transform.y + frame.rows * transform.sy);
+        const width = right - left,
+          height = bottom - top;
+        if (width < 8 || height < 8) return Promise.resolve(null);
+        const scale = Math.max(1, Math.min(3, 800 / width)),
+          ratio = canvas.current.width / size.width;
+        const output = document.createElement('canvas');
+        output.width = Math.round(width * scale);
+        output.height = Math.round(height * scale);
+        const ctx = output.getContext('2d');
+        ctx.scale(scale, scale);
+        ctx.drawImage(
+          canvas.current,
+          left * ratio,
+          top * ratio,
+          width * ratio,
+          height * ratio,
+          0,
+          0,
+          width,
+          height,
+        );
+        ctx.translate(-left, -top);
+        drawCalipers(ctx, transform, finding, true, [left, right], approx);
+        ctx.translate(left, top);
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#acbcbf';
+        ctx.fillText(
+          `${series.plane} · Image ${index + 1}/${series.frames.length} · W ${Math.round(windowing.width)} L ${Math.round(windowing.center)}`,
+          8,
+          16,
+        );
+        return new Promise((resolve) => output.toBlob(resolve, 'image/png'));
+      },
     }),
-    [ready, error, size, placed, selectedId, series, index, windowing],
+    [ready, error, size, placed, selectedId, series, index, windowing, frame, transform, approx],
   );
+  const insideImage = (pixel) =>
+    pixel[0] >= 0 && pixel[0] <= frame.columns - 1 && pixel[1] >= 0 && pixel[1] <= frame.rows - 1;
+  const toPixel = (e) => {
+    const rect = host.current.getBoundingClientRect();
+    return screenToPixel(transform, [e.clientX - rect.left, e.clientY - rect.top]);
+  };
+  const [measuring, setMeasuring] = useState(null);
   function pointerDown(e) {
     if (!frame || !ready || error || e.button !== 0) return;
-    const rect = host.current.getBoundingClientRect();
     if (mode === 'label') {
-      const pixel = screenToPixel(transform, [e.clientX - rect.left, e.clientY - rect.top]);
-      if (
-        pixel[0] >= 0 &&
-        pixel[0] <= frame.columns - 1 &&
-        pixel[1] >= 0 &&
-        pixel[1] <= frame.rows - 1
-      )
-        onAdd(pixel);
+      const pixel = toPixel(e);
+      if (insideImage(pixel)) onAdd(pixel);
+      return;
+    }
+    if (mode === 'measure' || mode === 'roi') {
+      const pixel = toPixel(e);
+      if (!insideImage(pixel)) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setMeasuring([pixel, pixel]);
       return;
     }
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -254,6 +314,11 @@ const DicomViewer = forwardRef(function DicomViewer(
     };
   }
   function pointerMove(e) {
+    if (measuring) {
+      const [x, y] = toPixel(e);
+      setMeasuring([measuring[0], [clamp(x, 0, frame.columns - 1), clamp(y, 0, frame.rows - 1)]]);
+      return;
+    }
     if (!drag.current) return;
     const dx = e.clientX - drag.current.x,
       dy = e.clientY - drag.current.y;
@@ -276,9 +341,23 @@ const DicomViewer = forwardRef(function DicomViewer(
       onPointerMove={pointerMove}
       onPointerUp={() => {
         drag.current = null;
+        if (measuring) {
+          const [[x1, y1], [x2, y2]] = measuring;
+          const length = Math.hypot(x2 - x1, y2 - y1);
+          // Ignore clicks; a caliper or density circle needs a real drag.
+          if (mode === 'roi' && length >= 1) {
+            const roi = { center: measuring[0], radius: length };
+            onRoi?.({
+              ...roi,
+              stats: current ? roiStats(current, frame, roi.center, roi.radius) : null,
+            });
+          } else if (mode === 'measure' && length >= 2) onMeasure?.(measuring);
+          setMeasuring(null);
+        }
       }}
       onPointerCancel={() => {
         drag.current = null;
+        setMeasuring(null);
       }}
     >
       <canvas
@@ -290,6 +369,11 @@ const DicomViewer = forwardRef(function DicomViewer(
           <div className="viewport-meta">
             <span>
               <b>{series.plane.toUpperCase()}</b>
+              {phase && (
+                <span className={`phase-badge ${phaseInfo(phase).enhanced ? 'enhanced' : ''}`}>
+                  {phaseInfo(phase).name}
+                </span>
+              )}
               <span className="mono">
                 {String(index + 1).padStart(3, '0')} <em>/ {series.frames.length}</em>
               </span>
@@ -370,6 +454,48 @@ const DicomViewer = forwardRef(function DicomViewer(
               {error}
             </div>
           )}
+          {ready && !error && transform && (
+            <svg className="finding-overlay" viewBox={`0 0 ${size.width} ${size.height}`}>
+              {findings
+                .filter((f) => f.status !== 'rejected')
+                .map((f) => (
+                  <Calipers
+                    key={f.id}
+                    finding={f}
+                    transform={transform}
+                    selected={f.id === selectedFindingId}
+                    onSelect={onSelectFinding}
+                    approx={approx}
+                  />
+                ))}
+              {measureDraft?.frameId === frame.id && (
+                <Calipers
+                  finding={{ ...measureDraft, label: 'New', ...draftSizes(frame, measureDraft) }}
+                  transform={transform}
+                  draft
+                />
+              )}
+              {measuring && mode === 'measure' && (
+                <Calipers
+                  finding={{
+                    label: '',
+                    long: measuring,
+                    ...draftSizes(frame, { long: measuring }),
+                  }}
+                  transform={transform}
+                  draft
+                  approx={approx}
+                />
+              )}
+              {measuring && mode === 'roi' && current && (
+                <RoiCircle
+                  roi={liveRoi(measuring, current, frame)}
+                  transform={transform}
+                  color="#ffffff"
+                />
+              )}
+            </svg>
+          )}
           {mode === 'label' && ready && (
             <div className="mode-hint">
               <Icon name="tag" size={14} />
@@ -412,4 +538,150 @@ const DicomViewer = forwardRef(function DicomViewer(
     </div>
   );
 });
+const findingColor = (f, draft) =>
+  draft ? '#ffffff' : f.status === 'unreviewed' ? '#ff9f6b' : '#f5c96a';
+function draftSizes(frame, draft) {
+  const long = lineLength(frame, draft.long),
+    short = lineLength(frame, draft.short);
+  return { longMm: long?.value ?? null, shortMm: short?.value ?? null, unit: long?.unit };
+}
+const liveRoi = (drag, pixels, frame) => {
+  const radius = Math.hypot(drag[1][0] - drag[0][0], drag[1][1] - drag[0][1]);
+  return {
+    center: drag[0],
+    radius,
+    stats: radius >= 1 ? roiStats(pixels, frame, drag[0], radius) : null,
+  };
+};
+function RoiCircle({ roi, transform, color, label }) {
+  const [cx, cy] = pixelToScreen(transform, roi.center);
+  // Pixels may be non-square, so a pixel-space circle is drawn as an ellipse on screen.
+  const rx = roi.radius * transform.sx,
+    ry = roi.radius * transform.sy;
+  const text = `${label ? `${label} · ` : ''}${formatHu(roi.stats)}`;
+  return (
+    <g className="roi-circle">
+      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={color} strokeWidth="1.6" />
+      <circle cx={cx} cy={cy} r="1.8" fill={color} />
+      {roi.stats && (
+        <text x={cx + rx + 6} y={cy + 4} fill={color}>
+          {text}
+        </text>
+      )}
+    </g>
+  );
+}
+function Calipers({ finding, transform, selected, draft, onSelect, approx }) {
+  const color = findingColor(finding, draft);
+  if (!finding.long)
+    return finding.roi ? (
+      <g
+        className={`calipers ${selected ? 'selected' : ''}`}
+        onPointerDown={(e) => onSelect && e.stopPropagation()}
+        onClick={() => onSelect?.(finding.id)}
+      >
+        <RoiCircle roi={finding.roi} transform={transform} color={color} label={finding.label} />
+      </g>
+    ) : null;
+  const project = (line) => line?.map((p) => pixelToScreen(transform, p));
+  const long = project(finding.long),
+    short = project(finding.short);
+  const tag = `${finding.label ? `${finding.label} · ` : ''}${formatSize(finding, { approx })}`;
+  const anchor = long[0][0] > long[1][0] ? long[0] : long[1];
+  const dashed = finding.status === 'unreviewed' && !draft;
+  return (
+    <g
+      className={`calipers ${selected ? 'selected' : ''} ${draft ? 'draft' : ''}`}
+      onPointerDown={(e) => onSelect && e.stopPropagation()}
+      onClick={() => onSelect?.(finding.id)}
+    >
+      {finding.roi && !draft && <RoiCircle roi={finding.roi} transform={transform} color={color} />}
+      {[long, short].filter(Boolean).map((line, i) => (
+        <g key={i}>
+          <line
+            x1={line[0][0]}
+            y1={line[0][1]}
+            x2={line[1][0]}
+            y2={line[1][1]}
+            stroke={color}
+            strokeWidth={selected ? 2.2 : 1.6}
+            strokeDasharray={i === 1 || dashed ? '5 3' : undefined}
+          />
+          {line.map((p, j) => (
+            <circle key={j} cx={p[0]} cy={p[1]} r={selected ? 3.5 : 2.6} fill={color} />
+          ))}
+        </g>
+      ))}
+      {finding.longMm != null && (
+        <text x={anchor[0] + 8} y={anchor[1] - 8} fill={color}>
+          {tag}
+        </text>
+      )}
+    </g>
+  );
+}
+// `bounds` is the visible [left, right] range, so the size label never runs off the image.
+function drawCalipers(ctx, transform, finding, selected, bounds, approx) {
+  const color = findingColor(finding);
+  const project = (line) => line?.map((p) => pixelToScreen(transform, p));
+  const lines = [project(finding.long), project(finding.short)];
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  if (finding.roi) {
+    const [cx, cy] = pixelToScreen(transform, finding.roi.center);
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.ellipse(
+      cx,
+      cy,
+      finding.roi.radius * transform.sx,
+      finding.roi.radius * transform.sy,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.stroke();
+    if (!finding.long) {
+      ctx.font = '600 13px Inter, Segoe UI, sans-serif';
+      const tag = `${finding.label} · ${formatHu(finding.roi.stats)}`;
+      const x = cx + finding.roi.radius * transform.sx + 6;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(5, 10, 13, 0.85)';
+      ctx.strokeText(tag, x, cy + 4);
+      ctx.fillText(tag, x, cy + 4);
+      return;
+    }
+  }
+  lines.forEach((line, i) => {
+    if (!line) return;
+    ctx.lineWidth = selected ? 2.2 : 1.6;
+    ctx.setLineDash(i === 1 ? [5, 3] : []);
+    ctx.beginPath();
+    ctx.moveTo(...line[0]);
+    ctx.lineTo(...line[1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const p of line) {
+      ctx.beginPath();
+      ctx.arc(...p, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  const long = lines[0],
+    right = long[0][0] > long[1][0] ? long[0] : long[1],
+    left = right === long[0] ? long[1] : long[0];
+  ctx.font = '600 13px Inter, Segoe UI, sans-serif';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(5, 10, 13, 0.85)';
+  const tag = `${finding.label} · ${formatSize(finding, { approx })}`,
+    width = ctx.measureText(tag).width;
+  let x = right[0] + 8,
+    y = right[1] - 8;
+  if (bounds && x + width > bounds[1] - 4) {
+    x = Math.max(bounds[0] + 4, left[0] - 8 - width);
+    y = left[1] - 8;
+  }
+  ctx.strokeText(tag, x, y);
+  ctx.fillText(tag, x, y);
+}
 export default DicomViewer;

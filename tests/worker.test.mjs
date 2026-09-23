@@ -92,6 +92,17 @@ test(
         frames.map((f) => f.id),
       );
       assert.equal(annotations.records[0].model.version, 'synthetic-test-only');
+      // Timing is recorded per step and learned for later estimates.
+      assert.ok(Date.parse(result.finishedAt) >= Date.parse(result.startedAt));
+      assert.deepEqual(
+        result.steps.map((s) => s.id),
+        ['prepare', 'total', 'save'],
+      );
+      assert.ok(result.steps.every((s) => s.startedAt && s.finishedAt));
+      assert.equal(result.steps[1].estimateSeconds, null);
+      assert.equal(result.frameCount, 3);
+      const stats = await readJson(path.join(directory, 'job-stats.json'));
+      assert.equal(Object.values(stats)[0].runs, 1);
       const exited = once(child, 'exit');
       child.kill('SIGTERM');
       await exited;

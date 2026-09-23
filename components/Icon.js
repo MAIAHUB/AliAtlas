@@ -1,4 +1,16 @@
 const paths = {
+  ruler: (
+    <>
+      <path d="m3 17 14-14 4 4L7 21l-4-4Z" />
+      <path d="m7 13 2 2m1-5 2 2m1-5 2 2" />
+    </>
+  ),
+  report: (
+    <>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M15 3v4h4M9 12h7M9 16h7M9 8h3" />
+    </>
+  ),
   upload: (
     <>
       <path d="M12 16V3m-4 4 4-4 4 4" />

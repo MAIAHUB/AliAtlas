@@ -1376,11 +1376,97 @@ svg {
 .ai-section p.job-error {
   color: #d698a0;
 }
-.job-progress progress {
+.job-timer {
+  margin-top: 12px;
+}
+.job-clock {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.job-clock div {
+  padding: 8px 10px;
+  background: #0d161b;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+}
+.job-clock small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.job-clock b {
+  display: block;
+  margin-top: 3px;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.job-timer.completed .job-clock div:first-child b {
+  color: var(--accent);
+}
+.job-timer progress {
   width: 100%;
   height: 3px;
   accent-color: var(--accent);
-  margin-top: 12px;
+  margin-top: 10px;
+}
+.ai-section p.job-hint {
+  margin-top: 6px;
+  color: var(--faint);
+}
+.job-steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.job-steps li {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--faint);
+}
+.job-steps li span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-steps li .mono {
+  font-variant-numeric: tabular-nums;
+}
+.job-steps i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--faint);
+}
+.job-steps li.done {
+  color: #a6bbb9;
+}
+.job-steps li.done i {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.job-steps li.running {
+  color: var(--text);
+}
+.job-steps li.running i {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(131, 217, 189, 0.18);
+  animation: job-pulse 1.2s ease-in-out infinite;
+}
+@keyframes job-pulse {
+  50% {
+    box-shadow: 0 0 0 1px rgba(131, 217, 189, 0.1);
+  }
 }
 .annotation-file-actions {
   display: flex;

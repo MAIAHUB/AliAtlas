@@ -56,6 +56,8 @@ export function makeDicom({
   enhancedFrames = 0,
   transferSyntax,
   modality = 'CT',
+  seriesDescription = 'Synthetic QA phantom',
+  contrastAgent,
 } = {}) {
   const count = enhancedFrames || 1;
   const pixels = Buffer.alloc(rows * columns * count * (bits / 8));
@@ -75,7 +77,8 @@ export function makeDicom({
     e(8, 0x16, 'UI', sop),
     e(8, 0x18, 'UI', sopUID),
     e(8, 0x60, 'CS', modality),
-    e(8, 0x103e, 'LO', 'Synthetic QA phantom'),
+    e(8, 0x103e, 'LO', seriesDescription),
+    ...(contrastAgent ? [e(0x18, 0x10, 'LO', contrastAgent)] : []),
     e(0x18, 0x15, 'CS', 'NECK'),
     e(0x18, 0x50, 'DS', '2'),
     e(0x20, 0x0d, 'UI', studyUID),
