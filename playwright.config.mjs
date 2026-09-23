@@ -32,6 +32,16 @@ export default defineConfig({
     url: 'http://127.0.0.1:3200',
     reuseExistingServer: false,
     timeout: 60000,
-    env: { ATLAS_DATA_DIR: testData, ATLAS_AI_ENABLED: 'false', NEXT_TELEMETRY_DISABLED: '1' },
+    env: {
+      ATLAS_DATA_DIR: testData,
+      ATLAS_AI_ENABLED: 'false',
+      NEXT_TELEMETRY_DISABLED: '1',
+      DATABASE_URL:
+        process.env.DATABASE_URL ||
+        'postgres://aliatlas:aliatlas-dev-password@127.0.0.1:5432/aliatlas',
+      ORTHANC_URL: process.env.ORTHANC_URL || '',
+      ORTHANC_USERNAME: process.env.ORTHANC_USERNAME || '',
+      ORTHANC_PASSWORD: process.env.ORTHANC_PASSWORD || '',
+    },
   },
 });

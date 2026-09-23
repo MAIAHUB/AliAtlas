@@ -12,6 +12,13 @@ test('imports real DICOM bytes, scrolls, labels, persists, and exports an actual
   const folder = await createFixtures(),
     files = (await fs.readdir(folder)).map((f) => path.join(folder, f));
   await page.goto('/');
+  await expect(page).toHaveURL(/\/login$/);
+  await page.screenshot({ path: 'test-results/login.png' });
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  await page.getByLabel('Name').fill('QA Reviewer');
+  await page.getByLabel('Email').fill(`qa-${Date.now()}@example.test`);
+  await page.getByLabel('Password').fill('synthetic-phantom-pass');
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Import your first study' })).toBeEnabled();
   await page.screenshot({ path: 'test-results/empty-workspace.png', fullPage: true });
   await page.getByRole('button', { name: 'Import your first study' }).click();
@@ -68,6 +75,16 @@ test('imports real DICOM bytes, scrolls, labels, persists, and exports an actual
     .isDisabled()
     .then((disabled) => expect(disabled).toBe(true));
   await page.screenshot({ path: 'test-results/ct-workspace.png', fullPage: true });
+  if (process.env.ORTHANC_URL) {
+    await expect(page.getByText('Private · Orthanc archive')).toBeVisible();
+    await page.getByRole('button', { name: 'Import DICOM' }).click();
+    await page.getByRole('tab', { name: 'From Orthanc archive' }).click();
+    await expect(page.locator('.archive-list li')).toHaveCount(1);
+    await page.screenshot({ path: 'test-results/orthanc-archive.png' });
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page.locator('.study-list .study-button')).toHaveCount(2);
+    await expect(page.getByRole('heading', { name: 'Synthetic QA phantom' })).toBeVisible();
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Synthetic QA phantom' })).toBeVisible();
@@ -78,6 +95,15 @@ test('imports real DICOM bytes, scrolls, labels, persists, and exports an actual
   expect(errors).toEqual([]);
 });
 
+// Distinct UIDs from the phantom so the Orthanc archive never sees conflicting copies.
+const apiDicom = (index, extra = {}) =>
+  makeDicom({
+    index,
+    studyUID: '1.2.826.0.1.3680043.10.543.2',
+    seriesUID: '1.2.826.0.1.3680043.10.543.2.1',
+    sopUID: `1.2.826.0.1.3680043.10.543.2.1.${index + 1}`,
+    ...extra,
+  });
 test('isolates workspaces and validates writes and pixel responses', async ({ playwright }) => {
   const one = await playwright.request.newContext({ baseURL: 'http://127.0.0.1:3200' }),
     two = await playwright.request.newContext({ baseURL: 'http://127.0.0.1:3200' });
@@ -91,8 +117,37 @@ test('isolates workspaces and validates writes and pixel responses', async ({ pl
         })
       ).status(),
     ).toBe(401);
-    await one.get('/api/workspace');
-    await two.get('/api/workspace');
+    expect((await one.get('/api/workspace')).status()).toBe(401);
+    const stamp = Date.now(),
+      account = { name: 'One', email: `one-${stamp}@example.test`, password: 'first-account-pass' };
+    expect((await one.post('/api/auth/register', { data: account })).status()).toBe(201);
+    expect((await one.post('/api/auth/register', { data: account })).status()).toBe(409);
+    expect(
+      (
+        await two.post('/api/auth/register', {
+          data: { name: 'Two', email: `two-${stamp}@example.test`, password: 'short' },
+        })
+      ).status(),
+    ).toBe(400);
+    expect(
+      (
+        await two.post('/api/auth/register', {
+          data: {
+            name: 'Two',
+            email: `two-${stamp}@example.test`,
+            password: 'second-account-pass',
+          },
+        })
+      ).status(),
+    ).toBe(201);
+    expect(
+      (
+        await two.post('/api/auth/login', {
+          data: { email: account.email, password: 'not-the-password' },
+        })
+      ).status(),
+    ).toBe(401);
+    expect((await (await one.get('/api/workspace')).json()).user.email).toBe(account.email);
     expect(
       (
         await one.post('/api/studies/import', {
@@ -105,13 +160,13 @@ test('isolates workspaces and validates writes and pixel responses', async ({ pl
     ).toBe(403);
     const upload = await one.post('/api/studies/import', {
       multipart: {
-        first: { name: 'b.dcm', mimeType: 'application/dicom', buffer: makeDicom({ index: 2 }) },
-        second: { name: 'a.dcm', mimeType: 'application/dicom', buffer: makeDicom({ index: 0 }) },
-        third: { name: 'c.dcm', mimeType: 'application/dicom', buffer: makeDicom({ index: 1 }) },
+        first: { name: 'b.dcm', mimeType: 'application/dicom', buffer: apiDicom(2) },
+        second: { name: 'a.dcm', mimeType: 'application/dicom', buffer: apiDicom(0) },
+        third: { name: 'c.dcm', mimeType: 'application/dicom', buffer: apiDicom(1) },
         duplicate: {
           name: 'dup.dcm',
           mimeType: 'application/dicom',
-          buffer: makeDicom({ index: 1 }),
+          buffer: apiDicom(1),
         },
         invalid: { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not dicom') },
       },
@@ -160,6 +215,41 @@ test('isolates workspaces and validates writes and pixel responses', async ({ pl
     ).toBe(503);
     expect((await one.delete(`/api/studies/${id}`)).status()).toBe(200);
     expect((await one.get(`/api/studies/${id}`)).status()).toBe(404);
+    if (process.env.ORTHANC_URL) {
+      expect(result.archive[0].instances).toBe(3);
+      const orthancStudyId = result.archive[0].orthancStudyId;
+      const listed = await (await one.get('/api/orthanc/studies')).json();
+      expect(listed.studies.map((s) => s.id)).toContain(orthancStudyId);
+      expect((await (await two.get('/api/orthanc/studies')).json()).studies).toEqual([]);
+      expect(
+        (await two.post('/api/orthanc/studies/import', { data: { orthancStudyId } })).status(),
+      ).toBe(404);
+      // Reusing a known UID with different pixels must not grant access to the archived copy.
+      const forged = await two.post('/api/studies/import', {
+        multipart: {
+          file: {
+            name: 'forged.dcm',
+            mimeType: 'application/dicom',
+            buffer: apiDicom(0, { intercept: -1000 }),
+          },
+        },
+      });
+      expect(forged.status()).toBe(409);
+      expect((await (await two.get('/api/orthanc/studies')).json()).studies).toEqual([]);
+      const reopened = await one.post('/api/orthanc/studies/import', { data: { orthancStudyId } });
+      expect(reopened.status()).toBe(201);
+      expect((await reopened.json()).importedFrames).toBe(3);
+    }
+    expect((await one.post('/api/auth/logout')).status()).toBe(200);
+    expect((await one.get('/api/workspace')).status()).toBe(401);
+    expect(
+      (
+        await one.post('/api/auth/login', {
+          data: { email: account.email, password: account.password },
+        })
+      ).status(),
+    ).toBe(200);
+    expect((await one.get('/api/workspace')).status()).toBe(200);
   } finally {
     await one.dispose();
     await two.dispose();
