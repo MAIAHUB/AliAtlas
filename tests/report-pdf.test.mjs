@@ -65,7 +65,7 @@ test('spells out symbols the PDF standard fonts cannot draw', () => {
   assert.equal(pdfText('雪'), '?');
 });
 
-test('AI fills findings, impression, limitations and recommendation; measurements are protected', async () => {
+test('drafting fills findings, impression, limitations and recommendation; measurements are protected', async () => {
   await withFinding(async (study, finding) => {
     const empty = { status: 'draft', revision: 0 };
     let sent;
@@ -123,12 +123,12 @@ test('AI fills findings, impression, limitations and recommendation; measurement
     const none = await generateReportDraft(study, [], empty, async () => {
       called = true;
     });
-    assert.equal(called, false, 'no AI call without findings');
+    assert.equal(called, false, 'no drafting call without findings');
     assert.match(none.impression, /No measured abnormality/);
   });
 });
 
-test('checks that AI text keeps every measurement exactly', () => {
+test('checks that drafted text keeps every measurement exactly', () => {
   const f = { status: 'confirmed', longMm: 28.3, shortMm: 20, ccMm: 2.5 };
   assert.equal(keepsMeasurements('measures 28.3 × 20.0 × 2.5 mm', [f]), true);
   assert.equal(keepsMeasurements('measures 28.3 × 20 × 2.5 mm', [f]), false);

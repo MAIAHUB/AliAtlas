@@ -5,8 +5,8 @@ import { detectAbnormalities } from '../../../../../lib/vision.js';
 import { mutateFindings, validateFinding } from '../../../../../lib/findings.js';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
-// Asks b.ai for abnormality suggestions on the selected slices. Earlier unreviewed
-// AI suggestions on those slices are replaced; reviewed ones are kept.
+// Asks the detection service for abnormality suggestions on the selected slices. Earlier
+// unreviewed automated suggestions on those slices are replaced; reviewed ones are kept.
 export const POST = route(async (request, { params }) => {
   sameOrigin(request);
   const { user, owner } = await requireUser(request),

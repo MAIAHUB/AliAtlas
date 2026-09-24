@@ -720,7 +720,7 @@ export default function AtlasWorkspace({ user }) {
       if (first) selectFinding(first);
       setNotice({
         type: result.created.length ? 'warning' : 'success',
-        message: `b.ai ${result.created.length ? `suggested ${result.created.length} possible abnormalit${result.created.length === 1 ? 'y' : 'ies'}` : 'found no abnormality'} in ${result.seconds}s.${result.summary ? ` ${result.summary}` : ''}${result.created.length ? ' Review each suggestion before reporting.' : ''}`,
+        message: `Automated detection ${result.created.length ? `suggested ${result.created.length} possible abnormalit${result.created.length === 1 ? 'y' : 'ies'}` : 'found no abnormality'} in ${result.seconds}s.${result.summary ? ` ${result.summary}` : ''}${result.created.length ? ' Review each suggestion before reporting.' : ''}`,
       });
     } catch (e) {
       fail(e);
@@ -1541,7 +1541,7 @@ export default function AtlasWorkspace({ user }) {
                           <b>{annotation.label}</b>
                           <small>
                             {annotation.source === 'model'
-                              ? 'AI label'
+                              ? 'Auto label'
                               : annotation.source === 'imported'
                                 ? 'Imported'
                                 : 'Manual label'}
@@ -1606,7 +1606,7 @@ export default function AtlasWorkspace({ user }) {
                       <b>{selected.label}</b>
                       <p>
                         {selected.source === 'model'
-                          ? `${selected.model?.name || 'AI model'} · ${selected.reviewed ? 'Reviewed' : 'Needs review'}`
+                          ? `Auto label · ${selected.reviewed ? 'Reviewed' : 'Needs review'}`
                           : selected.source === 'manual'
                             ? 'Manually placed on this slice'
                             : 'Imported · verify this placement'}

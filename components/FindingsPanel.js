@@ -22,7 +22,7 @@ const PHASE_SOURCES = {
 };
 
 // Abnormal findings for the open series: contrast phase, measured lesions, density
-// (HU), AI suggestions to review, abnormality detection, and the report entry point.
+// (HU), automated suggestions to review, abnormality detection, and the report entry point.
 export default function FindingsPanel({
   findings,
   series,
@@ -103,7 +103,7 @@ export default function FindingsPanel({
           <Icon name="sparkles" size={15} />
           <b>Detect abnormalities</b>
           <span className={`ai-state ${vision?.configured ? 'ready' : ''}`}>
-            {vision?.configured ? 'B.AI' : 'NOT CONNECTED'}
+            {vision?.configured ? 'READY' : 'OFF'}
           </span>
         </div>
         <label className="sr-only" htmlFor="detect-scope">
@@ -131,7 +131,7 @@ export default function FindingsPanel({
         </button>
         <p>
           {vision?.configured
-            ? 'AI suggestions are drafts. Confirm or reject each one; sizes are measured by AliAtlas from the scan.'
+            ? 'Automated suggestions are drafts. Confirm or reject each one; sizes are measured by AliAtlas from the scan.'
             : vision?.message}
         </p>
       </div>
@@ -159,7 +159,7 @@ export default function FindingsPanel({
               <span className="finding-size mono">{summary(f)}</span>
               {f.status === 'unreviewed' && (
                 <span className="finding-flag">
-                  AI{f.confidence != null ? ` ${Math.round(f.confidence * 100)}%` : ''}
+                  AUTO{f.confidence != null ? ` ${Math.round(f.confidence * 100)}%` : ''}
                 </span>
               )}
             </button>
@@ -169,18 +169,18 @@ export default function FindingsPanel({
       {!list.length && (
         <p className="findings-empty">
           No findings yet. Use <b>Measure lesion</b> to drag across a lesion&apos;s longest
-          diameter, <b>HU</b> to measure density, or ask b.ai to find abnormalities.
+          diameter, <b>HU</b> to measure density, or use Find abnormalities.
         </p>
       )}
       {rejected.length > 0 && (
-        <p className="findings-rejected">{rejected.length} rejected AI suggestion(s) hidden.</p>
+        <p className="findings-rejected">{rejected.length} rejected suggestion(s) hidden.</p>
       )}
       {selected && selected.status !== 'rejected' && (
         <div className="finding-detail">
           <b>{selected.label}</b>
           <p>
             {categoryName(selected.category)}
-            {selected.source === 'ai' ? ` · suggested by ${selected.model || 'b.ai'}` : ''}
+            {selected.source === 'ai' ? ' · auto-detected' : ''}
           </p>
           <dl className="finding-measures">
             {selected.longMm != null && (

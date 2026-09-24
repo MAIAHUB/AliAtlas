@@ -76,8 +76,8 @@ A **single-frame DICOM file supplies one slice**. Upload the full series to scro
 
 - **Measure** (M): drag across a lesion's longest diameter, then optionally drag the perpendicular short axis. AliAtlas computes the size in millimetres from the DICOM pixel spacing (row spacing along y, column spacing along x); sizes are always recomputed on the server. Uncalibrated images are measured in pixels and labelled `px`.
 - Each finding has a name, category (mass/tumour, nodule, lymph node, cyst, fluid, other), description, image number and a key image (the slice with its calipers) captured when it is saved or confirmed.
-- **Detect abnormalities** sends the current image, the 15 images around it, or 16 images sampled across the series to b.ai. Suggestions appear as orange dashed calipers marked for review; b.ai proposes where to measure, AliAtlas measures. Earlier unreviewed suggestions on the same images are replaced; reviewed ones are kept.
-- **Report**: clinical history, technique (prefilled from the series), findings (insertable from confirmed measurements, in slice order), impression, a lesion table with key images, and a printable page at `/report/<study>` (use the browser's _Save as PDF_). A report cannot be finalized while any AI suggestion is unreviewed; a final report records who finalized it and is read-only until reopened.
+- **Detect abnormalities** sends the current image, the 15 images around it, or 16 images sampled across the series to the configured detection service. Suggestions appear as orange dashed calipers marked for review; the service proposes where to measure, AliAtlas measures. Earlier unreviewed suggestions on the same images are replaced; reviewed ones are kept.
+- **Report**: clinical history, technique (prefilled from the series), findings (insertable from confirmed measurements, in slice order), impression, a lesion table with key images, and a printable page at `/report/<study>` (use the browser's _Save as PDF_). A report cannot be finalized while any automated suggestion is unreviewed; a final report records who finalized it and is read-only until reopened.
 
 ### Plain (non-contrast) CT
 
@@ -91,7 +91,7 @@ Plain CT is suitable for screening and teaching, but lesion margins and enhancem
 
 **Third dimension**: for a measured lesion, go to its top and bottom images and use **Top = this image** / **Bottom = this image**. The craniocaudal size uses DICOM slice positions plus one slice interval, giving **L × W × CC**, and an ellipsoid volume estimate (π/6 × L × W × H). Coronal and sagittal reformats are not yet available.
 
-### Connect b.ai
+### Connect the detection service
 
 Add to `.env` (Docker) or `.env.local` (`npm run dev`):
 
@@ -102,9 +102,9 @@ BAI_MODEL=model-that-accepts-images
 BAI_API_STYLE=openai
 ```
 
-The adapter in `lib/vision.js` calls `POST {BAI_BASE_URL}/chat/completions` with `Authorization: Bearer {BAI_API_KEY}` and PNG slices as `image_url` data URLs, and expects a JSON answer. It sends only rendered pixels, image size, pixel spacing, window and body region: no patient name, IDs, dates or DICOM UIDs. The key stays on the server. If b.ai uses a different request format, only `lib/vision.js` needs to change.
+The adapter in `lib/vision.js` calls `POST {BAI_BASE_URL}/chat/completions` with `Authorization: Bearer {BAI_API_KEY}` and PNG slices as `image_url` data URLs, and expects a JSON answer. It sends only rendered pixels, image size, pixel spacing, window and body region: no patient name, IDs, dates or DICOM UIDs. The key stays on the server. If the service uses a different request format, only `lib/vision.js` needs to change.
 
-AI suggestions are drafts for a qualified reader, not a diagnosis. A general-purpose vision model can miss lesions or report ones that are not there.
+Automated suggestions are drafts for a qualified reader, not a diagnosis. They can miss lesions or report ones that are not there.
 
 ## Enable automatic anatomical labels
 
@@ -141,7 +141,7 @@ The worker checks the installed runtime and exposes a heartbeat. The Generate bu
 
 With `ATLAS_AUTO_LABEL_ON_IMPORT=true`, each upload queues the largest eligible CT stack in each imported study as soon as the worker is ready. Imports that contain multiple monotonic acquisition runs under one DICOM series are separated into stacks. A set of images all at the same slice position cannot be labeled as a volume; upload a full run of distinct slices. If the worker is offline or no stack is eligible, the upload still succeeds and the app explains why labeling did not start.
 
-The head/neck preset runs `total`, `head_glands_cavities`, `head_muscles`, `headneck_bones_vessels`, and `headneck_muscles`. Other presets run the major-structure `total` task on the selected CT series. Detailed coverage differs from the reference screenshots; a structure unsupported by the model needs manual labeling or another validated model. No generic text/image AI is used to guess pointer locations.
+The head/neck preset runs `total`, `head_glands_cavities`, `head_muscles`, `headneck_bones_vessels`, and `headneck_muscles`. Other presets run the major-structure `total` task on the selected CT series. Detailed coverage differs from the reference screenshots; a structure unsupported by the model needs manual labeling or another validated model. Anatomy label positions come only from the segmentation masks, never from a generic image model.
 
 The worker obtains label IDs from the **same installed model package** that generated the volume. It transforms DICOM LPS coordinates into NIfTI RAS coordinates, samples each original image plane, and chooses an anchor inside each structure's sampled mask. Labels are marked for review. Only conventional, non-overlapping, geometry-complete, single-frame series with at least three slices are accepted for automatic labeling.
 
@@ -219,7 +219,7 @@ Import `fixtures/ct`. These generated files are excluded from Git and are **not*
 | `lib/db.js`, `lib/auth.js`             | PostgreSQL schema, accounts, password hashing and sessions              |
 | `lib/orthanc.js`                       | Orthanc archive upload, per-account ownership and reopening             |
 | `lib/findings.js`, `lib/measure.js`    | Findings, caliper sizes in mm, review status and key images             |
-| `lib/vision.js`, `lib/report.js`       | b.ai abnormality detection adapter and structured reports               |
+| `lib/vision.js`, `lib/report.js`       | Abnormality detection adapter and structured reports                    |
 | `lib/jobs.js`, `scripts/worker.mjs`    | Persistent job queue and TotalSegmentator process integration           |
 | `lib/segmentation.js`                  | NIfTI labelmap alignment and mask-contained anchors                     |
 | `tests/`                               | Synthetic fixtures, unit/integration tests and browser checks           |

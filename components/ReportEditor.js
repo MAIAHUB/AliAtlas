@@ -27,7 +27,7 @@ function KeyImage({ studyId, finding }) {
 }
 
 // Structured radiology report for a study. Findings text can be generated from the
-// confirmed measurements; finalizing is blocked until every AI suggestion is reviewed.
+// confirmed measurements; finalizing is blocked until every automated suggestion is reviewed.
 export default function ReportEditor({ study, findings, api, onClose, onError }) {
   const [report, setReport] = useState(null),
     [draft, setDraft] = useState(null),
@@ -88,7 +88,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
       setSaving(false);
     }
   }
-  // Fills every section from the measurements; B.AI drafts the impression when connected.
+  // Fills every section from the measurements; the drafting service writes the narrative.
   async function autoGenerate() {
     // Ask only when the reader has typed something: text that matches the saved report or
     // the automatic findings would simply be regenerated.
@@ -121,8 +121,8 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
       });
       const source =
         generated.impressionSource === 'template'
-          ? 'Report generated from the measurements (templates; B.AI not used).'
-          : `Findings, impression, limitations and recommendation written by ${generated.impressionSource} via B.AI; technique from the DICOM.`;
+          ? 'Report generated from the measurements (templates).'
+          : 'Findings, impression, limitations and recommendation drafted automatically; technique from the DICOM.';
       const history = draft.clinicalHistory?.trim()
         ? ''
         : ' Add the clinical history: it cannot be known from the images.';
@@ -176,13 +176,13 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
           title={final ? 'This report is final. Click Reopen to regenerate it.' : undefined}
         >
           {generating ? <span className="spinner small" /> : <Icon name="sparkles" size={15} />}
-          {generating ? 'Writing report…' : 'Auto-generate with AI'}
+          {generating ? 'Writing report…' : 'Auto-generate report'}
         </button>
       </div>
       {final && (
         <p className="form-hint">
           This report is final and locked. Click <b>Reopen</b> below to edit it or regenerate it
-          with AI.
+          automatically.
         </p>
       )}
       <div className="report-type">
@@ -274,8 +274,8 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
       )}
       {pending > 0 && !final && (
         <p className="form-error">
-          {pending} AI suggestion{pending === 1 ? '' : 's'} still need review before this report can
-          be finalized.
+          {pending} automated suggestion{pending === 1 ? '' : 's'} still need review before this
+          report can be finalized.
         </p>
       )}
       {message && (
@@ -284,8 +284,8 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
         </p>
       )}
       <p className="form-hint">
-        Educational workspace. AI suggestions are not a diagnosis; a qualified reader is responsible
-        for the final report.
+        Educational workspace. Automated suggestions and drafts are not a diagnosis; a qualified
+        reader is responsible for the final report.
       </p>
       <div className="modal-actions">
         <button className="text-button" onClick={onClose} disabled={saving}>
@@ -314,7 +314,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
               className="primary-button"
               disabled={saving || pending > 0 || !draft.impression.trim()}
               onClick={() => save('final')}
-              title={pending ? 'Review every AI suggestion first' : undefined}
+              title={pending ? 'Review every automated suggestion first' : undefined}
             >
               <Icon name="check" size={15} />
               Finalize

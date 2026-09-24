@@ -136,7 +136,7 @@ test('stores findings with server-computed sizes and gates report finalization o
     await mutateFindings(owner, study.id, () => [manual, ai]);
     await assert.rejects(
       updateReport(owner, study.id, { impression: 'Liver mass.', status: 'final' }, reviewer),
-      /Review 1 AI suggestion/,
+      /Review 1 automated suggestion/,
     );
     await mutateFindings(owner, study.id, (records) =>
       records.map((r) =>
@@ -163,7 +163,7 @@ test('stores findings with server-computed sizes and gates report finalization o
   });
 });
 
-test('sends only rendered pixels to b.ai and keeps well-formed suggestions', async () => {
+test('sends only rendered pixels to the detection service and keeps well-formed suggestions', async () => {
   await withStudy(async (study) => {
     const series = study.series[0];
     const env = ['BAI_API_KEY', 'BAI_BASE_URL', 'BAI_MODEL'].map((k) => [k, process.env[k]]);
@@ -197,7 +197,7 @@ test('sends only rendered pixels to b.ai and keeps well-formed suggestions', asy
           seriesId: series.id,
           frameIds: [series.frames[0].id],
         }),
-        /BAI_API_KEY/,
+        /not configured/,
       );
       process.env.BAI_API_KEY = 'test-key';
       process.env.BAI_BASE_URL = `http://127.0.0.1:${server.address().port}/v1/`;

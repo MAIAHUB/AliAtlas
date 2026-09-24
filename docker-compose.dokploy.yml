@@ -60,8 +60,8 @@ services:
       ORTHANC_USERNAME: aliatlas
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD}
       BAI_API_KEY: ${BAI_API_KEY:-}
-      BAI_BASE_URL: ${BAI_BASE_URL:-https://api.b.ai/v1}
-      BAI_MODEL: ${BAI_MODEL:-gemini-3.5-flash}
+      BAI_BASE_URL: ${BAI_BASE_URL:-}
+      BAI_MODEL: ${BAI_MODEL:-}
       BAI_API_STYLE: openai
     volumes:
       - atlas-data:/app/data

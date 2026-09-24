@@ -100,7 +100,7 @@ export default async function ReportPage({ params }) {
                       {f.label}
                       <small>
                         {categoryName(f.category)}
-                        {f.source === 'ai' ? ' · AI-suggested, confirmed by reader' : ''}
+                        {f.source === 'ai' ? ' · auto-detected, confirmed by reader' : ''}
                       </small>
                     </td>
                     <td>
@@ -141,7 +141,7 @@ export default async function ReportPage({ params }) {
         )}
         {pending > 0 && (
           <p className="print-warning">
-            {pending} AI suggestion(s) have not been reviewed and are not included.
+            {pending} automated suggestion(s) have not been reviewed and are not included.
           </p>
         )}
         <footer>
@@ -155,7 +155,8 @@ export default async function ReportPage({ params }) {
             {diagnostic
               ? 'Measurements are made on the displayed images.'
               : 'Screening report on non-contrast or unconfirmed-phase CT: sizes marked ≈ are approximate and this report is not sufficient for diagnosis.'}{' '}
-            AI-assisted suggestions are not a diagnosis and were reviewed by the reader named above.
+            Automated suggestions and drafts are not a diagnosis and were reviewed by the reader
+            named above.
           </p>
         </footer>
       </article>
