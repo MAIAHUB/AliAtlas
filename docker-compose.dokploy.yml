@@ -1,0 +1,89 @@
+# Production stack for Dokploy (Docker Compose app). Differences from compose.yaml:
+# - No host ports: the web app is reached only through Dokploy's Traefik (add a domain
+#   for service "web", port 3000). PostgreSQL and Orthanc stay on the internal network.
+# - CPU anatomy worker with resource limits, so it cannot starve other apps on the host.
+# - Every secret comes from the Dokploy environment (Environment tab); none are in Git.
+# Required env: POSTGRES_PASSWORD, ORTHANC_PASSWORD, ATLAS_PUBLIC_ORIGIN.
+# Optional env: BAI_API_KEY, BAI_BASE_URL, BAI_MODEL, ATLAS_COOKIE_SECURE (true behind HTTPS).
+services:
+  postgres:
+    image: postgres:17.11-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aliatlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Dokploy}
+      POSTGRES_DB: aliatlas
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-orthanc.sql:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'aliatlas', '-d', 'aliatlas']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  orthanc:
+    image: orthancteam/orthanc:26.9.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ORTHANC__NAME: AliAtlas archive
+      ORTHANC__AUTHENTICATION_ENABLED: 'true'
+      ORTHANC__REGISTERED_USERS: '{"aliatlas": "${ORTHANC_PASSWORD:?Set ORTHANC_PASSWORD in Dokploy}"}'
+      ORTHANC__POSTGRESQL__HOST: postgres
+      ORTHANC__POSTGRESQL__DATABASE: orthanc
+      ORTHANC__POSTGRESQL__USERNAME: aliatlas
+      ORTHANC__POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - orthanc-storage:/var/lib/orthanc/db
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      orthanc:
+        condition: service_started
+    expose:
+      - '3000'
+    environment:
+      ATLAS_DATA_DIR: /app/data
+      ATLAS_AI_ENABLED: 'true'
+      ATLAS_AUTO_LABEL_ON_IMPORT: ${ATLAS_AUTO_LABEL_ON_IMPORT:-false}
+      ATLAS_PUBLIC_ORIGIN: ${ATLAS_PUBLIC_ORIGIN:?Set ATLAS_PUBLIC_ORIGIN to the app URL}
+      ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-false}
+      DATABASE_URL: postgres://aliatlas:${POSTGRES_PASSWORD}@postgres:5432/aliatlas
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USERNAME: aliatlas
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD}
+      BAI_API_KEY: ${BAI_API_KEY:-}
+      BAI_BASE_URL: ${BAI_BASE_URL:-https://api.b.ai/v1}
+      BAI_MODEL: ${BAI_MODEL:-gemini-3.5-flash}
+      BAI_API_STYLE: openai
+    volumes:
+      - atlas-data:/app/data
+
+  # Anatomy labelling on CPU (no GPU on this host). Limited to 6 of 8 CPUs and 12 GB RAM.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      ATLAS_DATA_DIR: /app/data
+      ATLAS_AI_DEVICE: cpu
+      ATLAS_AI_FAST: 'true'
+      ATLAS_AI_TIMEOUT_MS: ${ATLAS_AI_TIMEOUT_MS:-3600000}
+      OMP_NUM_THREADS: '6'
+    cpus: 6
+    mem_limit: 12g
+    volumes:
+      - atlas-data:/app/data
+
+volumes:
+  atlas-data:
+  postgres-data:
+  orthanc-storage:
