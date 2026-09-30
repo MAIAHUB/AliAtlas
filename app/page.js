@@ -1,9 +1,10 @@
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AtlasWorkspace from '../components/AtlasWorkspace.js';
-import { SESSION_COOKIE, userFromToken } from '../lib/auth.js';
+import { currentUser } from '../lib/auth.js';
+import { maiaEnabled, maiaSignInUrl } from '../lib/maia.js';
 export default async function Page() {
-  const user = await userFromToken((await cookies()).get(SESSION_COOKIE)?.value);
-  if (!user) redirect('/login');
+  const user = await currentUser(await headers());
+  if (!user) redirect(maiaEnabled() ? maiaSignInUrl() : '/login');
   return <AtlasWorkspace user={{ email: user.email, name: user.name }} />;
 }

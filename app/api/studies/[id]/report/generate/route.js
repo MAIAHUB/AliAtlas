@@ -6,6 +6,7 @@ import { loadStudy } from '../../../../../../lib/storage.js';
 import { readFindings } from '../../../../../../lib/findings.js';
 import { readReport, generateReportDraft } from '../../../../../../lib/report.js';
 import { draftReport, visionStatus } from '../../../../../../lib/vision.js';
+import { withToken } from '../../../../../../lib/tokens.js';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
@@ -18,12 +19,13 @@ export const POST = route(async (request, { params }) => {
     report = await readReport(owner, id),
     { records } = await readFindings(owner, id);
   assert(report.status !== 'final', 'This report is final. Reopen it before regenerating.', 409);
-  const draft = await generateReportDraft(
-    study,
-    records,
-    report,
-    visionStatus().configured ? draftReport : null,
-  );
+  // Only a drafted report costs a token; without the drafting service the
+  // template draft is free.
+  const drafting = visionStatus().configured;
+  const build = () => generateReportDraft(study, records, report, drafting ? draftReport : null);
+  const { result: draft, wallet } = drafting
+    ? await withToken(request, 'report', build)
+    : { result: await build(), wallet: null };
   await audit(user.id, 'report.generate', { studyId: id, impression: draft.impressionSource });
-  return json(draft);
+  return json({ ...draft, wallet });
 });

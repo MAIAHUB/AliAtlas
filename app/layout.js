@@ -2,7 +2,7 @@ import './globals.css';
 import './findings.css';
 import './maia-theme.css';
 export const metadata = {
-  title: 'AliAtlas · Anatomy workspace',
+  title: 'Ali CT · Anatomy workspace',
   description: 'Explore CT anatomy, one slice at a time.',
 };
 export const viewport = {

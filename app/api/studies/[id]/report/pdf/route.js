@@ -28,7 +28,7 @@ export const GET = route(async (request, { params }) => {
   return new Response(pdf, {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="AliAtlas-CT-${kind}-report-${date}.pdf"`,
+      'Content-Disposition': `attachment; filename="Ali-CT-${kind}-report-${date}.pdf"`,
       'Cache-Control': 'private, no-store',
     },
   });

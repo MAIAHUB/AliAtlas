@@ -20,7 +20,12 @@
   --brand-strong: oklch(0.48 0.18 281);
   --brand-contrast: oklch(1 0 0);
   --brand-soft: oklch(0.94 0.04 287);
-  --logo-fill: linear-gradient(125deg, oklch(0.5 0.2 292) 0%, oklch(0.58 0.18 268) 48%, oklch(0.66 0.14 232) 100%);
+  --logo-fill: linear-gradient(
+    125deg,
+    oklch(0.5 0.2 292) 0%,
+    oklch(0.58 0.18 268) 48%,
+    oklch(0.66 0.14 232) 100%
+  );
   --urgent: oklch(0.5 0.19 27);
   --urgent-soft: oklch(0.952 0.022 27);
   --caution: oklch(0.78 0.13 80);
@@ -29,11 +34,14 @@
   --border: oklch(0.9 0.02 287);
   --border-strong: oklch(0.84 0.025 285);
   --elev-1: 0 1px 2px oklch(0.32 0.04 280 / 0.05), 0 2px 8px -1px oklch(0.32 0.04 280 / 0.08);
-  --elev-2: 0 1px 2px oklch(0.32 0.04 280 / 0.05), 0 6px 16px -4px oklch(0.32 0.045 280 / 0.1),
+  --elev-2:
+    0 1px 2px oklch(0.32 0.04 280 / 0.05), 0 6px 16px -4px oklch(0.32 0.045 280 / 0.1),
     0 12px 32px -12px oklch(0.32 0.045 280 / 0.14);
-  --elev-3: 0 2px 4px oklch(0.3 0.05 280 / 0.06), 0 10px 24px -6px oklch(0.3 0.05 280 / 0.14),
+  --elev-3:
+    0 2px 4px oklch(0.3 0.05 280 / 0.06), 0 10px 24px -6px oklch(0.3 0.05 280 / 0.14),
     0 24px 56px -16px oklch(0.3 0.05 280 / 0.26);
-  --elev-cta: inset 0 1px 0 oklch(1 0 0 / 0.5), 0 2px 8px oklch(0.48 0.18 281 / 0.16),
+  --elev-cta:
+    inset 0 1px 0 oklch(1 0 0 / 0.5), 0 2px 8px oklch(0.48 0.18 281 / 0.16),
     0 12px 34px -10px oklch(0.48 0.18 281 / 0.36);
   --sheen: oklch(1 0 0 / 0.5);
   --aurora-blend: multiply;
@@ -76,7 +84,12 @@
     --brand-strong: oklch(0.55 0.19 270);
     --brand-contrast: oklch(1 0 0);
     --brand-soft: oklch(0.27 0.07 270);
-    --logo-fill: linear-gradient(125deg, oklch(0.68 0.2 294) 0%, oklch(0.76 0.16 266) 48%, oklch(0.84 0.13 228) 100%);
+    --logo-fill: linear-gradient(
+      125deg,
+      oklch(0.68 0.2 294) 0%,
+      oklch(0.76 0.16 266) 48%,
+      oklch(0.84 0.13 228) 100%
+    );
     --urgent: oklch(0.7 0.16 27);
     --urgent-soft: oklch(0.245 0.045 27);
     --caution: oklch(0.8 0.115 80);
@@ -87,7 +100,8 @@
     --elev-1: 0 1px 2px oklch(0.03 0.012 270 / 0.55), 0 2px 8px -1px oklch(0.03 0.012 270 / 0.4);
     --elev-2: 0 1px 2px oklch(0.03 0.012 270 / 0.6), 0 8px 20px -6px oklch(0.03 0.012 270 / 0.55);
     --elev-3: 0 2px 6px oklch(0.02 0.01 270 / 0.6), 0 16px 40px -10px oklch(0.02 0.01 270 / 0.7);
-    --elev-cta: inset 0 1px 0 oklch(1 0 0 / 0.35), 0 2px 10px oklch(0.55 0.19 270 / 0.3),
+    --elev-cta:
+      inset 0 1px 0 oklch(1 0 0 / 0.35), 0 2px 10px oklch(0.55 0.19 270 / 0.3),
       0 14px 40px -10px oklch(0.55 0.19 270 / 0.45);
     --sheen: oklch(1 0 0 / 0.1);
     --aurora-blend: screen;
@@ -333,7 +347,11 @@ svg g:focus-visible {
 }
 .primary-button {
   color: var(--brand-contrast);
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--brand-strong) 88%, white), var(--brand-strong));
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--brand-strong) 88%, white),
+    var(--brand-strong)
+  );
   border: 0;
   box-shadow: var(--elev-cta);
 }
@@ -644,7 +662,11 @@ input[type='range'] {
 /* empty state: a calm light panel instead of a black box */
 .viewer-empty {
   background:
-    radial-gradient(ellipse 60% 50% at 50% 28%, color-mix(in oklab, var(--brand) 12%, transparent), transparent 70%),
+    radial-gradient(
+      ellipse 60% 50% at 50% 28%,
+      color-mix(in oklab, var(--brand) 12%, transparent),
+      transparent 70%
+    ),
     var(--surface);
 }
 .scan-emblem {
@@ -897,7 +919,11 @@ input[type='range'] {
 }
 .ai-section {
   border-top: 1px solid var(--border);
-  background: linear-gradient(160deg, color-mix(in oklab, var(--brand-soft) 80%, transparent), transparent 70%);
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--brand-soft) 80%, transparent),
+    transparent 70%
+  );
 }
 .ai-heading > span:first-child {
   color: var(--brand-ink);
@@ -922,7 +948,11 @@ input[type='range'] {
   height: 38px;
 }
 .generate-button {
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--brand-strong) 88%, white), var(--brand-strong));
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--brand-strong) 88%, white),
+    var(--brand-strong)
+  );
   color: var(--brand-contrast);
   border: 0;
   border-radius: var(--radius-control);
@@ -1277,4 +1307,29 @@ input[type='range'] {
     font-size: 10px;
     padding: 7px 5px;
   }
+}
+
+/* ── Ali CT tokens (MAIA wallet) ── */
+.token-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  border: 1px solid color-mix(in oklab, var(--brand) 25%, transparent);
+  color: var(--brand-ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.token-chip:hover {
+  border-color: var(--brand);
+}
+.notice .notice-action {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--brand-contrast);
 }

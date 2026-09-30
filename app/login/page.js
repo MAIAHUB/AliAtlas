@@ -1,9 +1,12 @@
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import LoginForm from '../../components/LoginForm.js';
-import { SESSION_COOKIE, userFromToken } from '../../lib/auth.js';
-export const metadata = { title: 'Sign in · AliAtlas' };
+import { currentUser } from '../../lib/auth.js';
+import { maiaEnabled, maiaSignInUrl } from '../../lib/maia.js';
+export const metadata = { title: 'Sign in · Ali CT' };
+// With MAIA connected, sign-in happens on MAIA (Google); this page only serves local accounts.
 export default async function LoginPage() {
-  if (await userFromToken((await cookies()).get(SESSION_COOKIE)?.value)) redirect('/');
+  if (maiaEnabled()) redirect(maiaSignInUrl());
+  if (await currentUser(await headers())) redirect('/');
   return <LoginForm />;
 }

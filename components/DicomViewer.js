@@ -213,7 +213,7 @@ const DicomViewer = forwardRef(function DicomViewer(
         ctx.font = '12px sans-serif';
         ctx.fillStyle = '#acbcbf';
         ctx.fillText(
-          `AliAtlas · ${series.plane} · Slice ${index + 1}/${series.frames.length}`,
+          `Ali CT · ${series.plane} · Slice ${index + 1}/${series.frames.length}`,
           16,
           24,
         );
@@ -230,7 +230,7 @@ const DicomViewer = forwardRef(function DicomViewer(
           const url = URL.createObjectURL(blob),
             a = document.createElement('a');
           a.href = url;
-          a.download = `AliAtlas-slice-${index + 1}.png`;
+          a.download = `Ali-CT-slice-${index + 1}.png`;
           a.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         });

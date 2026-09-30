@@ -4,6 +4,7 @@ import { listStudies } from '../../../lib/storage.js';
 import { workerStatus } from '../../../lib/jobs.js';
 import { orthancStatus } from '../../../lib/orthanc.js';
 import { visionStatus } from '../../../lib/vision.js';
+import { maiaBuyTokensUrl, maiaEnabled } from '../../../lib/maia.js';
 export const runtime = 'nodejs';
 export const GET = route(async (request) => {
   const { user, owner } = await requireUser(request);
@@ -14,6 +15,7 @@ export const GET = route(async (request) => {
   ]);
   return json({
     user: { email: user.email, name: user.name },
+    wallet: maiaEnabled() ? { ...user.wallet, buyUrl: maiaBuyTokensUrl() } : null,
     studies,
     ai,
     archive,

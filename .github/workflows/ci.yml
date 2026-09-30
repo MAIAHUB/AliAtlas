@@ -1,4 +1,4 @@
-name: Verify AliAtlas
+name: Verify Ali CT
 on:
   pull_request:
   push:

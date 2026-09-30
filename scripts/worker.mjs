@@ -234,7 +234,7 @@ async function main() {
           message: 'Processing was interrupted by a server restart. Start a new job.',
         });
     }
-    console.log(`AliAtlas anatomy worker ready (TotalSegmentator ${metadata.version})`);
+    console.log(`Ali CT anatomy worker ready (TotalSegmentator ${metadata.version})`);
     while (!stopped) {
       const jobs = [];
       for (const file of await jobFiles()) {

@@ -25,7 +25,7 @@ services:
       # Orthanc Explorer 2 for administrators; bound to this machine only.
       - '127.0.0.1:8042:8042'
     environment:
-      ORTHANC__NAME: AliAtlas archive
+      ORTHANC__NAME: Ali CT archive
       ORTHANC__AUTHENTICATION_ENABLED: 'true'
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-aliatlas}": "${ORTHANC_PASSWORD:-aliatlas-dev-password}"}'
       ORTHANC__POSTGRESQL__HOST: postgres

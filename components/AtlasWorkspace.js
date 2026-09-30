@@ -28,7 +28,8 @@ async function api(url, options = {}) {
   });
   if (response.status === 401) signedOut();
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'The request failed.');
+  if (!response.ok)
+    throw Object.assign(new Error(body.error || 'The request failed.'), { code: body.code });
   return body;
 }
 function signedOut() {
@@ -216,7 +217,8 @@ export default function AtlasWorkspace({ user }) {
     [playing, setPlaying] = useState(false),
     [loading, setLoading] = useState(false),
     [saving, setSaving] = useState(false),
-    [notice, setNotice] = useState(null);
+    [notice, setNotice] = useState(null),
+    [wallet, setWallet] = useState(null);
   const [modal, setModal] = useState(null),
     [files, setFiles] = useState([]),
     [uploadProgress, setUploadProgress] = useState(null),
@@ -279,7 +281,15 @@ export default function AtlasWorkspace({ user }) {
   const labeledSlices = new Set(
     records.filter((r) => r.seriesId === seriesId).map((r) => r.frameId),
   ).size;
-  const fail = (e) => setNotice({ type: 'error', message: e.message });
+  const fail = (e) =>
+    setNotice(
+      e.code === 'NO_TOKENS'
+        ? { type: 'warning', message: e.message, buy: true }
+        : { type: 'error', message: e.message },
+    );
+  // Ali CT tokens (from MAIA). Only shown when the wallet is metered.
+  const metered = Boolean(wallet && !wallet.unlimited);
+  const updateWallet = (next) => next && setWallet((w) => ({ ...w, ...next }));
   function applyAnnotations(result, id) {
     if (currentStudy.current === id && result.revision >= annotationRevision.current) {
       annotationRevision.current = result.revision;
@@ -354,6 +364,7 @@ export default function AtlasWorkspace({ user }) {
     setAi(workspace.ai);
     setArchive(workspace.archive);
     setVision(workspace.vision);
+    setWallet(workspace.wallet);
     setInitialized(true);
     return workspace;
   }
@@ -369,6 +380,7 @@ export default function AtlasWorkspace({ user }) {
         setAi(w.ai);
         setArchive(w.archive);
         setVision(w.vision);
+        setWallet(w.wallet);
         setInitialized(true);
         if (w.studies[0]) openStudy(w.studies[0].id);
       })
@@ -392,6 +404,7 @@ export default function AtlasWorkspace({ user }) {
         if (!alive || currentStudy.current !== id) return;
         setJobs(nextJobs.jobs);
         setAi(workspace.ai);
+        setWallet(workspace.wallet);
         applyAnnotations(annotations, id);
       } catch {
         /* Foreground operations report errors; a temporary poll failure must not interrupt viewing. */
@@ -716,6 +729,7 @@ export default function AtlasWorkspace({ user }) {
         body: { seriesId, frameIds: detectFrames(scope), window: windowing },
       });
       setFindings(result.records);
+      updateWallet(result.wallet);
       const first = result.records.find((f) => f.id === result.created[0]);
       if (first) selectFinding(first);
       setNotice({
@@ -891,7 +905,7 @@ export default function AtlasWorkspace({ user }) {
   async function exportLabels() {
     try {
       const bundle = await api(`/api/studies/${study.id}/annotations?export`);
-      saveFile(JSON.stringify(bundle, null, 2), 'AliAtlas-annotations.json');
+      saveFile(JSON.stringify(bundle, null, 2), 'Ali-CT-annotations.json');
     } catch (e) {
       fail(e);
     }
@@ -944,14 +958,12 @@ export default function AtlasWorkspace({ user }) {
   return (
     <div className="atlas-app">
       <header className="app-header">
-        <a className="brand" href="/" aria-label="AliAtlas home">
+        <a className="brand" href="/" aria-label="Ali CT home">
           <span className="brand-mark">
             <span>A</span>
             <i />
           </span>
-          <span>
-            AliAtlas<span className="brand-dot">.</span>
-          </span>
+          <span>Ali CT</span>
           <span className="brand-divider" />
           <small>ANATOMY WORKSPACE</small>
         </a>
@@ -964,6 +976,22 @@ export default function AtlasWorkspace({ user }) {
                 : 'Private · archive offline'
               : 'Private workspace'}
           </span>
+          {wallet && (
+            <a
+              className="token-chip"
+              href={wallet.buyUrl}
+              title={
+                wallet.unlimited
+                  ? 'Included in your MAIA plan'
+                  : '1 token = 1 findings detection or 1 report. Click to buy more.'
+              }
+            >
+              <Icon name="sparkles" size={14} />
+              {wallet.unlimited
+                ? 'Unlimited'
+                : `${wallet.balance} token${wallet.balance === 1 ? '' : 's'}`}
+            </a>
+          )}
           <button
             className="text-button help-button"
             onClick={() => {
@@ -1059,11 +1087,11 @@ export default function AtlasWorkspace({ user }) {
             </div>
             <div>
               <b>Stored in your workspace</b>
-              <p>Scans stay on your AliAtlas server.</p>
+              <p>Scans stay on your Ali CT server.</p>
             </div>
           </div>
           <div className="sidebar-version">
-            <span>ALIATLAS / V0.1</span>
+            <span>ALI CT / V0.1</span>
             <span className="status-dot" />
             Teaching workspace
           </div>
@@ -1110,6 +1138,11 @@ export default function AtlasWorkspace({ user }) {
             >
               <Icon name={notice.type === 'success' ? 'check' : 'info'} size={16} />
               <span>{notice.message}</span>
+              {notice.buy && wallet?.buyUrl && (
+                <a className="primary-button notice-action" href={wallet.buyUrl}>
+                  Buy tokens
+                </a>
+              )}
               <button aria-label="Dismiss message" onClick={() => setNotice(null)}>
                 <Icon name="close" size={15} />
               </button>
@@ -1451,6 +1484,7 @@ export default function AtlasWorkspace({ user }) {
                   }}
                   onDelete={deleteFinding}
                   onDetect={detect}
+                  metered={metered}
                   onMeasure={startMeasure}
                   approx={approx}
                   phase={phase}
@@ -1887,7 +1921,7 @@ export default function AtlasWorkspace({ user }) {
                 <p>
                   {archive.enabled
                     ? 'Images are stored in your Orthanc archive and opened in your private workspace. Removing a study from the workspace keeps the archived copy.'
-                    : 'Images are uploaded to your AliAtlas server and kept in your private workspace. You can remove a study when you’re done.'}
+                    : 'Images are uploaded to your Ali CT server and kept in your private workspace. You can remove a study when you’re done.'}
                 </p>
               </div>
               <div className="upload-steps">
@@ -2113,6 +2147,9 @@ export default function AtlasWorkspace({ user }) {
             api={api}
             onClose={() => setModal(null)}
             onError={fail}
+            metered={metered && vision.configured}
+            buyUrl={wallet?.buyUrl}
+            onWallet={updateWallet}
           />
         </Modal>
       )}
