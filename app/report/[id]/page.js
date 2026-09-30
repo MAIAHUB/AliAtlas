@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
-import { SESSION_COOKIE, userFromToken } from '../../../lib/auth.js';
+import { currentUser } from '../../../lib/auth.js';
 import { loadStudy, studyDir } from '../../../lib/storage.js';
 import { readFindings } from '../../../lib/findings.js';
 import { readReport, withDefaults, sliceOf } from '../../../lib/report.js';
@@ -11,11 +11,11 @@ import { approximateSizes, classifyPhase, phaseInfo } from '../../../lib/contras
 import { formatHu } from '../../../lib/roi.js';
 import PrintButton from '../../../components/PrintButton.js';
 
-export const metadata = { title: 'CT report · AliAtlas' };
+export const metadata = { title: 'CT report · Ali CT' };
 
 // Print-friendly report. The browser's "Save as PDF" produces the PDF.
 export default async function ReportPage({ params }) {
-  const user = await userFromToken((await cookies()).get(SESSION_COOKIE)?.value);
+  const user = await currentUser(await headers());
   if (!user) redirect('/login');
   const { id } = await params;
   let study;
@@ -151,7 +151,7 @@ export default async function ReportPage({ params }) {
               : 'Not finalized.'}
           </p>
           <p>
-            Generated with AliAtlas, an educational workspace.{' '}
+            Generated with Ali CT, an educational workspace.{' '}
             {diagnostic
               ? 'Measurements are made on the displayed images.'
               : 'Screening report on non-contrast or unconfirmed-phase CT: sizes marked ≈ are approximate and this report is not sufficient for diagnosis.'}{' '}

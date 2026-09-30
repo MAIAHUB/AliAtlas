@@ -1,10 +1,10 @@
-# AliAtlas
+# Ali CT
 
 A CT anatomy workspace built with **Next.js, React, and a JavaScript/Node.js backend**, inspired by the supplied axial head/neck atlas references.
 
 Sign in, upload a DICOM series (archived in [Orthanc](https://www.orthanc-server.com/)), select a stack, scroll through its slices, and place anatomical labels that remain attached to the correct image coordinates. An optional Node worker runs a real segmentation model and creates slice-specific labels from its output.
 
-![AliAtlas desktop workspace displaying the synthetic QA phantom](docs/preview.png)
+![Ali CT desktop workspace displaying the synthetic QA phantom](docs/preview.png)
 
 The preview uses a generated software-test phantom, not a patient scan or an anatomical reference.
 
@@ -28,8 +28,8 @@ PostgreSQL holds accounts, sessions, archive ownership, and an audit log; the sc
 - Anyone who can reach the site can register with a name, email, and password (at least 10 characters). Passwords are hashed with scrypt; sessions are random 256-bit tokens stored only as SHA-256 hashes and sent as an HTTP-only, `SameSite=Strict` cookie for 30 days. Sign-in is throttled after 8 failures per account in 15 minutes.
 - Each account has its own private workspace. Every study, pixel, annotation, job, and archive request checks the signed-in user.
 - When `ORTHANC_URL` is set, every upload is stored in Orthanc before the study appears in the workspace (compressed files are archived in their original transfer syntax). If Orthanc is unreachable, the upload fails rather than skipping the archive.
-- Orthanc has no per-user permissions, so AliAtlas records which Orthanc instances each account uploaded. **Import DICOM → From Orthanc archive** lists and reopens only those instances; another account uploading the same Study Instance UID does not gain access to yours.
-- Removing a study from the workspace keeps its Orthanc copy. Delete archived data in Orthanc Explorer 2 at [localhost:8042](http://localhost:8042) (user `aliatlas`, password from `ORTHANC_PASSWORD`). Studies sent to Orthanc directly (not through AliAtlas) are not owned by any account and do not appear in the app.
+- Orthanc has no per-user permissions, so Ali CT records which Orthanc instances each account uploaded. **Import DICOM → From Orthanc archive** lists and reopens only those instances; another account uploading the same Study Instance UID does not gain access to yours.
+- Removing a study from the workspace keeps its Orthanc copy. Delete archived data in Orthanc Explorer 2 at [localhost:8042](http://localhost:8042) (user `aliatlas`, password from `ORTHANC_PASSWORD`). Studies sent to Orthanc directly (not through Ali CT) are not owned by any account and do not appear in the app.
 - Leave `ORTHANC_URL` empty to run without an archive.
 
 For a production build on a local server:
@@ -38,6 +38,14 @@ For a production build on a local server:
 npm run build
 npm start
 ```
+
+## MAIA sign-in and tokens
+
+Ali CT is part of MAIA. In production it runs at `ct.maiahub.my` and has no accounts of its own:
+
+- **Sign-in** is MAIA's Google sign-in. MAIA shares its session cookie across `*.maiahub.my` (`AUTH_COOKIE_DOMAIN=maiahub.my` in MAIA); Ali CT forwards it to MAIA's `/api/ct/me` to learn who is signed in. Signed-out visitors are sent to MAIA and return through MAIA's Ali CT page. An existing local account is linked to the MAIA account with the same email, so its studies stay.
+- **Tokens** live in MAIA, in an Ali CT wallet separate from MAIA's scan tokens. **Find abnormalities** and **Auto-generate report** cost one token each; labelling, measuring, editing and PDF export are free, and so is the template report when no drafting service is configured. The token is taken before the work starts and refunded if it fails. Paid MAIA plans (Practitioner, Clinic) are not charged. New users get 1 free token; packs (1 for US$2, 10 for US$15, 25 for US$30) are bought on MAIA's Ali CT page.
+- Configure `MAIA_URL`, `ALI_CT_URL` and `ALI_CT_SERVICE_KEY` here and the matching `ALI_CT_URL`, `ALI_CT_SERVICE_KEY`, `AUTH_COOKIE_DOMAIN` and `STRIPE_PRICE_CT_TOKENS_*` in MAIA. With `MAIA_URL` empty (local development, tests) Ali CT keeps its own email and password accounts and nothing is metered.
 
 ## What works
 
@@ -74,14 +82,14 @@ A **single-frame DICOM file supplies one slice**. Upload the full series to scro
 
 ## Findings, tumour measurement and reports
 
-- **Measure** (M): drag across a lesion's longest diameter, then optionally drag the perpendicular short axis. AliAtlas computes the size in millimetres from the DICOM pixel spacing (row spacing along y, column spacing along x); sizes are always recomputed on the server. Uncalibrated images are measured in pixels and labelled `px`.
+- **Measure** (M): drag across a lesion's longest diameter, then optionally drag the perpendicular short axis. Ali CT computes the size in millimetres from the DICOM pixel spacing (row spacing along y, column spacing along x); sizes are always recomputed on the server. Uncalibrated images are measured in pixels and labelled `px`.
 - Each finding has a name, category (mass/tumour, nodule, lymph node, cyst, fluid, other), description, image number and a key image (the slice with its calipers) captured when it is saved or confirmed.
-- **Detect abnormalities** sends the current image, the 15 images around it, or 16 images sampled across the series to the configured detection service. Suggestions appear as orange dashed calipers marked for review; the service proposes where to measure, AliAtlas measures. Earlier unreviewed suggestions on the same images are replaced; reviewed ones are kept.
+- **Detect abnormalities** sends the current image, the 15 images around it, or 16 images sampled across the series to the configured detection service. Suggestions appear as orange dashed calipers marked for review; the service proposes where to measure, Ali CT measures. Earlier unreviewed suggestions on the same images are replaced; reviewed ones are kept.
 - **Report**: clinical history, technique (prefilled from the series), findings (insertable from confirmed measurements, in slice order), impression, a lesion table with key images, and a printable page at `/report/<study>` (use the browser's _Save as PDF_). A report cannot be finalized while any automated suggestion is unreviewed; a final report records who finalized it and is read-only until reopened.
 
 ### Plain (non-contrast) CT
 
-Plain CT is suitable for screening and teaching, but lesion margins and enhancement cannot be assessed. AliAtlas therefore tracks each series' contrast phase:
+Plain CT is suitable for screening and teaching, but lesion margins and enhancement cannot be assessed. Ali CT therefore tracks each series' contrast phase:
 
 - The phase comes from the DICOM Contrast/Bolus Agent tag or the series/protocol description (e.g. _NC_, _plain_, _arterial_, _PV_, _delayed_); otherwise it is _Contrast unknown_. A reader can correct it in **Findings → Contrast phase**. The viewer shows the phase as a badge.
 - On non-contrast or unknown-phase series, sizes are shown as approximate (**≈**) everywhere: viewer, findings, reports and key images.
@@ -108,7 +116,7 @@ Automated suggestions are drafts for a qualified reader, not a diagnosis. They c
 
 ## Enable automatic anatomical labels
 
-DICOM metadata does not contain a ready-made list of all anatomical structures in each image. AliAtlas uses [TotalSegmentator](https://github.com/wasserth/TotalSegmentator) as an optional inference engine. The application backend and job worker remain JavaScript; the model itself requires its Python/PyTorch runtime.
+DICOM metadata does not contain a ready-made list of all anatomical structures in each image. Ali CT uses [TotalSegmentator](https://github.com/wasserth/TotalSegmentator) as an optional inference engine. The application backend and job worker remain JavaScript; the model itself requires its Python/PyTorch runtime.
 
 On a machine with Python 3.10+:
 

@@ -29,7 +29,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ORTHANC__NAME: AliAtlas archive
+      ORTHANC__NAME: Ali CT archive
       ORTHANC__AUTHENTICATION_ENABLED: 'true'
       ORTHANC__REGISTERED_USERS: '{"aliatlas": "${ORTHANC_PASSWORD:?Set ORTHANC_PASSWORD in Dokploy}"}'
       ORTHANC__POSTGRESQL__HOST: postgres
@@ -63,6 +63,11 @@ services:
       BAI_BASE_URL: ${BAI_BASE_URL:-}
       BAI_MODEL: ${BAI_MODEL:-}
       BAI_API_STYLE: openai
+      # Sign-in and Ali CT tokens come from MAIA (see README "MAIA sign-in and tokens").
+      MAIA_URL: ${MAIA_URL:-}
+      MAIA_PUBLIC_URL: ${MAIA_PUBLIC_URL:-}
+      ALI_CT_URL: ${ALI_CT_URL:-}
+      ALI_CT_SERVICE_KEY: ${ALI_CT_SERVICE_KEY:-}
     volumes:
       - atlas-data:/app/data
 

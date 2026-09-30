@@ -54,7 +54,7 @@ test('imports real DICOM bytes, scrolls, labels, persists, and exports an actual
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export slice', exact: true }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('AliAtlas-slice-7.png');
+  expect(download.suggestedFilename()).toBe('Ali-CT-slice-7.png');
   const file = await download.path();
   expect((await fs.readFile(file)).subarray(1, 4).toString()).toBe('PNG');
   const labelDownload = page.waitForEvent('download');

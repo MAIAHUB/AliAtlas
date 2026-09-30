@@ -35,9 +35,7 @@ export default function LoginForm() {
             <span>A</span>
             <i />
           </span>
-          <span>
-            AliAtlas<span className="brand-dot">.</span>
-          </span>
+          <span>Ali CT</span>
         </div>
         <h1>{registering ? 'Create your account' : 'Sign in to your workspace'}</h1>
         <p className="auth-subtitle">
@@ -99,7 +97,7 @@ export default function LoginForm() {
           {registering ? 'Create account' : 'Sign in'}
         </button>
         <p className="auth-switch">
-          {registering ? 'Already have an account?' : 'New to AliAtlas?'}{' '}
+          {registering ? 'Already have an account?' : 'New to Ali CT?'}{' '}
           <button
             type="button"
             className="text-button accent"

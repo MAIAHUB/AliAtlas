@@ -36,6 +36,7 @@ export default function FindingsPanel({
   onEdit,
   onDelete,
   onDetect,
+  metered,
   onMeasure,
   onReport,
   approx,
@@ -127,11 +128,11 @@ export default function FindingsPanel({
           onClick={() => onDetect(scope)}
         >
           {detecting ? <span className="spinner small" /> : <Icon name="sparkles" size={15} />}
-          {detecting ? 'Analyzing images…' : 'Find abnormalities'}
+          {detecting ? 'Analyzing images…' : `Find abnormalities${metered ? ' · 1 token' : ''}`}
         </button>
         <p>
           {vision?.configured
-            ? 'Automated suggestions are drafts. Confirm or reject each one; sizes are measured by AliAtlas from the scan.'
+            ? 'Automated suggestions are drafts. Confirm or reject each one; sizes are measured by Ali CT from the scan.'
             : vision?.message}
         </p>
       </div>

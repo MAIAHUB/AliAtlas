@@ -3,6 +3,7 @@ import { requireUser } from '../../../../../lib/auth.js';
 import { audit } from '../../../../../lib/db.js';
 import { detectAbnormalities } from '../../../../../lib/vision.js';
 import { mutateFindings, validateFinding } from '../../../../../lib/findings.js';
+import { withToken } from '../../../../../lib/tokens.js';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 // Asks the detection service for abnormality suggestions on the selected slices. Earlier
@@ -13,7 +14,9 @@ export const POST = route(async (request, { params }) => {
     { id } = await params,
     input = await readBody(request);
   const started = Date.now();
-  const result = await detectAbnormalities(owner, id, input);
+  const { result, wallet } = await withToken(request, 'detect', () =>
+    detectAbnormalities(owner, id, input),
+  );
   const analyzed = new Set(input.frameIds);
   let created = [];
   const findings = await mutateFindings(owner, id, (records, study) => {
@@ -39,5 +42,6 @@ export const POST = route(async (request, { params }) => {
     summary: result.summary,
     dropped: result.dropped,
     seconds: Math.round((Date.now() - started) / 100) / 10,
+    wallet,
   });
 });

@@ -28,7 +28,16 @@ function KeyImage({ studyId, finding }) {
 
 // Structured radiology report for a study. Findings text can be generated from the
 // confirmed measurements; finalizing is blocked until every automated suggestion is reviewed.
-export default function ReportEditor({ study, findings, api, onClose, onError }) {
+export default function ReportEditor({
+  study,
+  findings,
+  api,
+  onClose,
+  onError,
+  metered,
+  buyUrl,
+  onWallet,
+}) {
   const [report, setReport] = useState(null),
     [draft, setDraft] = useState(null),
     [saving, setSaving] = useState(false),
@@ -107,6 +116,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
     setMessage(null);
     try {
       const generated = await api(`/api/studies/${study.id}/report/generate`, { method: 'POST' });
+      onWallet?.(generated.wallet);
       setDraft({
         ...draft,
         reportType: generated.reportType,
@@ -131,7 +141,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
         text: `${source}${history} Review every section before saving.${generated.note ? ` ${generated.note}` : ''}`,
       });
     } catch (e) {
-      setMessage({ error: true, text: e.message });
+      setMessage({ error: true, text: e.message, buy: e.code === 'NO_TOKENS' });
     } finally {
       setGenerating(false);
     }
@@ -145,7 +155,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
       if (!response.ok) throw new Error((await response.json()).error || 'PDF failed.');
       const name =
         /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '')?.[1] ||
-        'AliAtlas-CT-report.pdf';
+        'Ali-CT-report.pdf';
       const url = URL.createObjectURL(await response.blob()),
         a = document.createElement('a');
       a.href = url;
@@ -176,7 +186,7 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
           title={final ? 'This report is final. Click Reopen to regenerate it.' : undefined}
         >
           {generating ? <span className="spinner small" /> : <Icon name="sparkles" size={15} />}
-          {generating ? 'Writing report…' : 'Auto-generate report'}
+          {generating ? 'Writing report…' : `Auto-generate report${metered ? ' · 1 token' : ''}`}
         </button>
       </div>
       {final && (
@@ -281,6 +291,14 @@ export default function ReportEditor({ study, findings, api, onClose, onError })
       {message && (
         <p className={message.error ? 'form-error' : 'form-hint'} role="status">
           {message.text}
+          {message.buy && buyUrl && (
+            <>
+              {' '}
+              <a className="text-button accent" href={buyUrl}>
+                Buy tokens
+              </a>
+            </>
+          )}
         </p>
       )}
       <p className="form-hint">
